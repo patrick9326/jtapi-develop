@@ -263,6 +263,49 @@ public class WebController {
                "        .phone-interface.active {\n" +
                "            display: block;\n" +
                "        }\n" +
+               "\n" +
+               "        /* 新增轉接面板樣式 */\n" +
+               "        .transfer-panel {\n" +
+               "            background: #34495e;\n" +
+               "            border-radius: 10px;\n" +
+               "            padding: 15px;\n" +
+               "            margin-bottom: 15px;\n" +
+               "            display: none;\n" +
+               "        }\n" +
+               "\n" +
+               "        .transfer-panel.active {\n" +
+               "            display: block;\n" +
+               "        }\n" +
+               "\n" +
+               "        .transfer-type-selector {\n" +
+               "            display: flex;\n" +
+               "            gap: 10px;\n" +
+               "            margin-bottom: 10px;\n" +
+               "        }\n" +
+               "\n" +
+               "        .transfer-type-btn {\n" +
+               "            flex: 1;\n" +
+               "            padding: 8px;\n" +
+               "            background: #7f8c8d;\n" +
+               "            color: white;\n" +
+               "            border: none;\n" +
+               "            border-radius: 5px;\n" +
+               "            cursor: pointer;\n" +
+               "            transition: background 0.3s;\n" +
+               "        }\n" +
+               "\n" +
+               "        .transfer-type-btn.selected {\n" +
+               "            background: #3498db;\n" +
+               "        }\n" +
+               "\n" +
+               "        .line-selector-enhanced {\n" +
+               "            background: #2c3e50;\n" +
+               "            border: 2px solid #3498db;\n" +
+               "            color: #ecf0f1;\n" +
+               "            border-radius: 8px;\n" +
+               "            padding: 10px;\n" +
+               "            margin-bottom: 10px;\n" +
+               "        }\n" +
                "    </style>\n" +
                "</head>\n" +
                "<body>\n" +
@@ -313,10 +356,30 @@ public class WebController {
                "            <div class=\"function-buttons\">\n" +
                "                <button class=\"function-btn\" onclick=\"holdCall()\">Hold</button>\n" +
                "                <button class=\"function-btn\" onclick=\"unholdCall()\">Unhold</button>\n" +
-               "                <button class=\"function-btn\" onclick=\"transferCall()\">Transfer</button>\n" +
+               "                <button class=\"function-btn\" onclick=\"showTransferPanel()\">Transfer</button>\n" +
                "                <button class=\"function-btn\" onclick=\"conference()\">Conference</button>\n" +
                "                <button class=\"function-btn\" onclick=\"toggleHold()\">Hold切換</button>\n" +
                "                <button class=\"function-btn\" onclick=\"showAgentPanel()\">Agent面板</button>\n" +
+               "            </div>\n" +
+               "\n" +
+               "            <!-- 轉接面板 -->\n" +
+               "            <div class=\"transfer-panel\" id=\"transferPanel\">\n" +
+               "                <h3 style=\"color: #ecf0f1; margin-bottom: 10px; text-align: center;\">轉接功能</h3>\n" +
+               "                <div class=\"transfer-type-selector\">\n" +
+               "                    <button class=\"transfer-type-btn selected\" id=\"blindTransferBtn\" onclick=\"selectTransferType('blind')\">一段轉接</button>\n" +
+               "                    <button class=\"transfer-type-btn\" id=\"consultTransferBtn\" onclick=\"selectTransferType('consult')\">二段轉接</button>\n" +
+               "                </div>\n" +
+               "                <input type=\"text\" id=\"transferTarget\" placeholder=\"轉接目標號碼\" style=\"width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 5px; border: none;\">\n" +
+               "                <div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 10px;\">\n" +
+               "                    <button class=\"function-btn\" onclick=\"executeTransfer()\">執行轉接</button>\n" +
+               "                    <button class=\"function-btn\" onclick=\"hideTransferPanel()\">取消</button>\n" +
+               "                </div>\n" +
+               "                <div id=\"transferControls\" style=\"display: none; margin-top: 10px;\">\n" +
+               "                    <div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 10px;\">\n" +
+               "                        <button class=\"function-btn\" onclick=\"completeTransfer()\">完成轉接</button>\n" +
+               "                        <button class=\"function-btn\" onclick=\"cancelTransfer()\">取消轉接</button>\n" +
+               "                    </div>\n" +
+               "                </div>\n" +
                "            </div>\n" +
                "\n" +
                "            <div class=\"agent-section\" id=\"agentSection\" style=\"display: none;\">\n" +
@@ -342,15 +405,15 @@ public class WebController {
                "                </div>\n" +
                "                \n" +
                "                <div class=\"line-selection\" style=\"margin-bottom: 15px;\">\n" +
-               "                    <label style=\"color: #ecf0f1; margin-bottom: 5px; display: block;\">選擇線路:</label>\n" +
-               "                    <select id=\"lineSelector\" style=\"width: 100%; padding: 8px; border-radius: 5px; border: none;\">\n" +
-               "                        <option value=\"\">自動選擇</option>\n" +
-               "                        <option value=\"L1\">線路 1</option>\n" +
-               "                        <option value=\"L2\">線路 2</option>\n" +
-               "                        <option value=\"L3\">線路 3</option>\n" +
-               "                        <option value=\"L4\">線路 4</option>\n" +
-               "                        <option value=\"L5\">線路 5</option>\n" +
-               "                        <option value=\"L6\">線路 6</option>\n" +
+               "                    <label style=\"color: #ecf0f1; margin-bottom: 5px; display: block; font-weight: bold;\">📞 選擇撥號線路:</label>\n" +
+               "                    <select id=\"lineSelector\" class=\"line-selector-enhanced\">\n" +
+               "                        <option value=\"\">🔄 自動選擇線路</option>\n" +
+               "                        <option value=\"L1\">📞 線路 1 (L1)</option>\n" +
+               "                        <option value=\"L2\">📞 線路 2 (L2)</option>\n" +
+               "                        <option value=\"L3\">📞 線路 3 (L3)</option>\n" +
+               "                        <option value=\"L4\">📞 線路 4 (L4)</option>\n" +
+               "                        <option value=\"L5\">📞 線路 5 (L5)</option>\n" +
+               "                        <option value=\"L6\">📞 線路 6 (L6)</option>\n" +
                "                    </select>\n" +
                "                </div>\n" +
                "            </div>\n" +
@@ -390,7 +453,8 @@ public class WebController {
                "        let currentExtension = '';\n" +
                "        let apiBase = window.location.origin;\n" +
                "        let refreshInterval;\n" +
-               "        let transferMode = false;\n" +
+               "        let transferMode = 'blind'; // 'blind' 或 'consult'\n" +
+               "        let transferInProgress = false;\n" +
                "\n" +
                "        async function login() {\n" +
                "            const extension = document.getElementById('extensionInput').value;\n" +
@@ -475,10 +539,10 @@ public class WebController {
                "        }\n" +
                "\n" +
                "        // ========================================\n" +
-               "        // 線路選擇撥號功能\n" +
+               "        // 改進的線路選擇撥號功能\n" +
                "        // ========================================\n" +
                "        \n" +
-               "        async function makeCallWithLineSelection() {\n" +
+               "        async function makeCall() {\n" +
                "            const number = document.getElementById('numberInput').value;\n" +
                "            const selectedLine = document.getElementById('lineSelector').value;\n" +
                "            \n" +
@@ -486,27 +550,20 @@ public class WebController {
                "                showStatus('請輸入號碼', 'error');\n" +
                "                return;\n" +
                "            }\n" +
-               "        \n" +
-               "            if (transferMode) {\n" +
-               "                const response = await fetch(`${apiBase}/api/unified-phone/transfer?ext=${currentExtension}&target=${number}`);\n" +
-               "                const result = await response.text();\n" +
-               "                if (result.includes('失敗') || result.includes('錯誤')) {\n" +
-               "                    showStatus(result, 'error');\n" +
-               "                } else {\n" +
-               "                    showStatus(result, 'success');\n" +
-               "                }\n" +
-               "                setTimeout(updateDisplay, 500);\n" +
-               "                document.getElementById('numberInput').value = '';\n" +
-               "                transferMode = false;\n" +
+               "            \n" +
+               "            let endpoint = 'dial';\n" +
+               "            let params = `ext=${currentExtension}&number=${number}`;\n" +
+               "            \n" +
+               "            // 如果有選擇線路，使用線路選擇API\n" +
+               "            if (selectedLine && selectedLine !== '') {\n" +
+               "                endpoint = 'select-line-and-dial';\n" +
+               "                params += `&preferredLine=${selectedLine}`;\n" +
+               "                showStatus(`使用${selectedLine}線路撥打 ${number}`, 'info');\n" +
                "            } else {\n" +
-               "                let endpoint = 'dial';\n" +
-               "                let params = `ext=${currentExtension}&number=${number}`;\n" +
-               "                \n" +
-               "                if (selectedLine) {\n" +
-               "                    endpoint = 'select-line-and-dial';\n" +
-               "                    params += `&preferredLine=${selectedLine}`;\n" +
-               "                }\n" +
-               "                \n" +
+               "                showStatus(`自動選擇線路撥打 ${number}`, 'info');\n" +
+               "            }\n" +
+               "            \n" +
+               "            try {\n" +
                "                const response = await fetch(`${apiBase}/api/unified-phone/${endpoint}?${params}`);\n" +
                "                const result = await response.text();\n" +
                "                \n" +
@@ -519,12 +576,9 @@ public class WebController {
                "                setTimeout(updateDisplay, 500);\n" +
                "                document.getElementById('numberInput').value = '';\n" +
                "                document.getElementById('lineSelector').value = '';\n" +
+               "            } catch (error) {\n" +
+               "                showStatus('撥號失敗: ' + error.message, 'error');\n" +
                "            }\n" +
-               "        }\n" +
-               "        \n" +
-               "        // 修改原有的 makeCall 函數\n" +
-               "        async function makeCall() {\n" +
-               "            await makeCallWithLineSelection();\n" +
                "        }\n" +
                "\n" +
                "        async function hangupCall() {\n" +
@@ -546,21 +600,87 @@ public class WebController {
                "        async function toggleHold() {\n" +
                "            await callAPI('toggle-hold');\n" +
                "        }\n" +
-               "        \n" +
-               "        async function resumeCall() {\n" +
-               "            await callAPI('flash');\n" +
-               "        }\n" +
                "\n" +
-               "        async function transferCall() {\n" +
-               "            if (!transferMode) {\n" +
-               "                transferMode = true;\n" +
-               "                showStatus('請輸入轉接目標號碼然後按撥號', 'info');\n" +
-               "                document.getElementById('numberInput').placeholder = '轉接目標...';\n" +
+               "        // ========================================\n" +
+               "        // 改進的轉接功能\n" +
+               "        // ========================================\n" +
+               "        \n" +
+               "        function showTransferPanel() {\n" +
+               "            const panel = document.getElementById('transferPanel');\n" +
+               "            panel.classList.add('active');\n" +
+               "            document.getElementById('transferTarget').focus();\n" +
+               "        }\n" +
+               "        \n" +
+               "        function hideTransferPanel() {\n" +
+               "            const panel = document.getElementById('transferPanel');\n" +
+               "            panel.classList.remove('active');\n" +
+               "            document.getElementById('transferControls').style.display = 'none';\n" +
+               "            transferInProgress = false;\n" +
+               "        }\n" +
+               "        \n" +
+               "        function selectTransferType(type) {\n" +
+               "            transferMode = type;\n" +
+               "            \n" +
+               "            // 更新按鈕樣式\n" +
+               "            document.getElementById('blindTransferBtn').classList.remove('selected');\n" +
+               "            document.getElementById('consultTransferBtn').classList.remove('selected');\n" +
+               "            \n" +
+               "            if (type === 'blind') {\n" +
+               "                document.getElementById('blindTransferBtn').classList.add('selected');\n" +
                "            } else {\n" +
-               "                await callAPI('transfer-complete');\n" +
-               "                transferMode = false;\n" +
-               "                document.getElementById('numberInput').placeholder = '輸入號碼...';\n" +
+               "                document.getElementById('consultTransferBtn').classList.add('selected');\n" +
                "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        async function executeTransfer() {\n" +
+               "            const target = document.getElementById('transferTarget').value;\n" +
+               "            if (!target) {\n" +
+               "                showStatus('請輸入轉接目標號碼', 'error');\n" +
+               "                return;\n" +
+               "            }\n" +
+               "            \n" +
+               "            let endpoint;\n" +
+               "            if (transferMode === 'blind') {\n" +
+               "                endpoint = 'blind-transfer';\n" +
+               "                showStatus('執行一段轉接...', 'info');\n" +
+               "            } else {\n" +
+               "                endpoint = 'consult-transfer';\n" +
+               "                showStatus('開始二段轉接諮詢...', 'info');\n" +
+               "            }\n" +
+               "            \n" +
+               "            try {\n" +
+               "                const response = await fetch(`${apiBase}/api/unified-phone/${endpoint}?ext=${currentExtension}&target=${target}`);\n" +
+               "                const result = await response.text();\n" +
+               "                \n" +
+               "                if (result.includes('失敗') || result.includes('錯誤')) {\n" +
+               "                    showStatus(result, 'error');\n" +
+               "                } else {\n" +
+               "                    showStatus(result, 'success');\n" +
+               "                    \n" +
+               "                    if (transferMode === 'consult') {\n" +
+               "                        // 二段轉接顯示完成控制項\n" +
+               "                        document.getElementById('transferControls').style.display = 'block';\n" +
+               "                        transferInProgress = true;\n" +
+               "                    } else {\n" +
+               "                        // 一段轉接完成，關閉面板\n" +
+               "                        hideTransferPanel();\n" +
+               "                    }\n" +
+               "                }\n" +
+               "                \n" +
+               "                setTimeout(updateDisplay, 500);\n" +
+               "            } catch (error) {\n" +
+               "                showStatus('轉接失敗: ' + error.message, 'error');\n" +
+               "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        async function completeTransfer() {\n" +
+               "            await callAPI('transfer-complete');\n" +
+               "            hideTransferPanel();\n" +
+               "        }\n" +
+               "        \n" +
+               "        async function cancelTransfer() {\n" +
+               "            await callAPI('transfer-cancel');\n" +
+               "            hideTransferPanel();\n" +
                "        }\n" +
                "\n" +
                "        async function conference() {\n" +
@@ -715,7 +835,6 @@ public class WebController {
                "                    statusElement.textContent = '未登入';\n" +
                "                    statusElement.style.color = '#e74c3c';\n" +
                "                } else {\n" +
-               "                    // 簡化顯示\n" +
                "                    const lines = result.split('\\\\n');\n" +
                "                    let agentInfo = '';\n" +
                "                    for (let line of lines) {\n" +
@@ -734,17 +853,16 @@ public class WebController {
                "            }\n" +
                "        }\n" +
                "        \n" +
-               "        // 修改 startAutoRefresh 函數，加入 Agent 狀態更新\n" +
                "        function startAutoRefresh() {\n" +
                "            updateDisplay();\n" +
                "            updateAgentStatus();\n" +
                "            refreshInterval = setInterval(() => {\n" +
                "                updateDisplay();\n" +
                "                updateAgentStatus();\n" +
-               "            }, 3000); // 改為 3 秒更新一次\n" +
+               "            }, 3000);\n" +
                "        }\n" +
                "\n" +
-               "        // 新增鍵盤快捷鍵\n" +
+               "        // 鍵盤快捷鍵\n" +
                "        document.addEventListener('keydown', function(event) {\n" +
                "            if (document.getElementById('phoneInterface').classList.contains('active')) {\n" +
                "                switch(event.key) {\n" +
@@ -783,7 +901,7 @@ public class WebController {
                "        });\n" +
                "    </script>\n" +
                "</body>\n" +
-"</html>";
+               "</html>";
     }
 
     /**

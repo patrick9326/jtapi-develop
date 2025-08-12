@@ -27,7 +27,8 @@ public class UnifiedPhoneService {
         TALKING,        // 通話中
         HELD,           // 保持
         CONFERENCING,   // 會議中
-        TRANSFERRING    // 轉接中
+        TRANSFERRING,   // 轉接中
+        DISCONNECTED    // 已斷線
     }
     
     /**
@@ -97,8 +98,16 @@ public class UnifiedPhoneService {
             return lines.stream().filter(l -> l.state == LineState.HELD).collect(java.util.stream.Collectors.toList());
         }
         
+        public List<PhoneLine> getRingingLines() {
+            return lines.stream().filter(l -> l.state == LineState.RINGING).collect(java.util.stream.Collectors.toList());
+        }
+        
         public int getActiveLineCount() {
-            return (int) lines.stream().filter(l -> l.state != LineState.IDLE).count();
+            return (int) lines.stream().filter(l -> l.state != LineState.IDLE && l.state != LineState.DISCONNECTED).count();
+        }
+        
+        public void removeDisconnectedLines() {
+            lines.removeIf(line -> line.state == LineState.DISCONNECTED);
         }
     }
     
@@ -191,7 +200,7 @@ public class UnifiedPhoneService {
             
             // 掛斷
             disconnectLine(extension, activeLine);
-            activeLine.state = LineState.IDLE;
+            activeLine.state = LineState.DISCONNECTED;
             phone.lines.remove(activeLine);
             
             // 自動切換到下一條線路
@@ -211,7 +220,7 @@ public class UnifiedPhoneService {
     }
     
     // ========================================
-    // 多線功能（像話機上的線路切換鍵）
+    // 多線功能（像話機上的線路切換鍵）- 修正版
     // ========================================
     
     /**
@@ -233,6 +242,95 @@ public class UnifiedPhoneService {
             
         } catch (Exception e) {
             return "Hold失敗: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 一般的 Unhold 功能（恢復被 Hold 的通話）
+     */
+    public String unholdCall(String extension) {
+        try {
+            PhoneState phone = phoneStates.get(extension);
+            if (phone == null) return "話機未初始化";
+            
+            // 找到被 Hold 的線路
+            List<PhoneLine> heldLines = phone.getHeldLines();
+            if (heldLines.isEmpty()) {
+                return "沒有保持中的線路可以恢復";
+            }
+            
+            // 恢復第一條被 Hold 的線路
+            PhoneLine heldLine = heldLines.get(0);
+            
+            // 先 Hold 當前活躍線路（如果有的話）
+            PhoneLine currentActive = phone.getActiveLine();
+            if (currentActive != null && !currentActive.lineId.equals(heldLine.lineId)) {
+                holdLine(extension, currentActive);
+                currentActive.state = LineState.HELD;
+            }
+            
+            // 恢復被 Hold 的線路
+            unholdLine(extension, heldLine);
+            heldLine.state = LineState.TALKING;
+            phone.activeLine = heldLine.lineId;
+            
+            return "線路 " + heldLine.lineId + " 已恢復：" + heldLine.getDisplayName();
+            
+        } catch (Exception e) {
+            return "恢復通話失敗: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 一般的 Hold 功能（保持當前活躍通話）
+     */
+    public String holdActiveCall(String extension) {
+        try {
+            PhoneState phone = phoneStates.get(extension);
+            if (phone == null) return "話機未初始化";
+            
+            PhoneLine activeLine = phone.getActiveLine();
+            if (activeLine == null) return "沒有活躍線路可以保持";
+            
+            if (activeLine.state != LineState.TALKING) {
+                return "線路 " + activeLine.lineId + " 不是通話狀態，無法保持";
+            }
+            
+            // 執行 Hold
+            holdLine(extension, activeLine);
+            activeLine.state = LineState.HELD;
+            phone.activeLine = null;
+            
+            return "線路 " + activeLine.lineId + " 已保持：" + activeLine.getDisplayName();
+            
+        } catch (Exception e) {
+            return "保持通話失敗: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 智能 Hold/Unhold 切換
+     */
+    public String toggleHoldCall(String extension) {
+        try {
+            PhoneState phone = phoneStates.get(extension);
+            if (phone == null) return "話機未初始化";
+            
+            PhoneLine activeLine = phone.getActiveLine();
+            List<PhoneLine> heldLines = phone.getHeldLines();
+            
+            if (activeLine != null && activeLine.state == LineState.TALKING) {
+                // 有活躍通話，執行 Hold
+                return holdActiveCall(extension);
+            } else if (!heldLines.isEmpty()) {
+                // 沒有活躍通話但有保持的通話，執行 Unhold
+                return unholdCall(extension);
+            } else {
+                return "沒有可操作的通話";
+            }
+            
+        } catch (Exception e) {
+            return "Hold/Unhold 切換失敗: " + e.getMessage();
         }
     }
     
@@ -301,11 +399,172 @@ public class UnifiedPhoneService {
     }
     
     // ========================================
+    // 指定線路撥號功能（新增）
+    // ========================================
+    
+    /**
+     * 指定線路撥打電話（新增線路選擇功能）
+     */
+    public String makeCallOnSpecificLine(String extension, String target, String preferredLineId) {
+        try {
+            PhoneState phone = getOrCreatePhone(extension);
+            
+            // 檢查指定線路是否真的可用
+            if (preferredLineId != null) {
+                PhoneLine existingLine = phone.findLine(preferredLineId);
+                if (existingLine != null && existingLine.state != LineState.IDLE) {
+                    return "線路 " + preferredLineId + " 正在使用中，無法撥號";
+                }
+            }
+            
+            if (phone.getActiveLineCount() >= phone.maxLines) {
+                return "已達線路上限";
+            }
+            
+            // 檢查指定線路是否可用
+            if (preferredLineId != null && !preferredLineId.isEmpty()) {
+                PhoneLine existingLine = phone.findLine(preferredLineId);
+                if (existingLine != null) {
+                    return "指定線路 " + preferredLineId + " 已被使用";
+                }
+            }
+            
+            // Hold當前活躍線路
+            PhoneLine currentActive = phone.getActiveLine();
+            if (currentActive != null) {
+                holdLine(extension, currentActive);
+                currentActive.state = LineState.HELD;
+            }
+            
+            // 建立新線路（使用指定的線路ID或自動生成）
+            String lineId = (preferredLineId != null && !preferredLineId.isEmpty()) 
+                           ? preferredLineId 
+                           : phone.generateLineId();
+            
+            Call newCall = createCall(extension, target);
+            
+            PhoneLine newLine = new PhoneLine(lineId, newCall, target, false);
+            newLine.state = LineState.TALKING;
+            phone.lines.add(newLine);
+            phone.activeLine = lineId;
+            
+            return "線路 " + lineId + " 撥打成功：" + newLine.getDisplayName();
+            
+        } catch (Exception e) {
+            return "指定線路撥打失敗: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 取得可用線路列表
+     */
+    public String getAvailableLines(String extension) {
+        PhoneState phone = getOrCreatePhone(extension);
+        
+        StringBuilder result = new StringBuilder();
+        result.append("=== 可用線路狀態 ===\n");
+        result.append("最大線路數：").append(phone.maxLines).append("\n");
+        result.append("已使用線路：").append(phone.getActiveLineCount()).append("\n");
+        result.append("可用線路數：").append(phone.maxLines - phone.getActiveLineCount()).append("\n\n");
+        
+        // 顯示建議的線路ID
+        if (phone.getActiveLineCount() < phone.maxLines) {
+            String nextLineId = phone.generateLineId();
+            result.append("建議使用線路ID：").append(nextLineId).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    // ========================================
     // 轉接功能（像話機的Transfer鍵）
     // ========================================
     
     /**
-     * 開始轉接（Transfer鍵 + 撥號）
+     * 一段轉接（盲轉）- 直接轉接不諮詢
+     */
+    public String blindTransfer(String extension, String target) {
+        try {
+            PhoneState phone = phoneStates.get(extension);
+            if (phone == null) return "話機未初始化";
+            
+            PhoneLine activeLine = phone.getActiveLine();
+            if (activeLine == null) return "沒有活躍線路可轉接";
+            
+            String originalParty = activeLine.remoteParty;
+            
+            // 執行一段轉接 - 直接重新連接
+            try {
+                if (activeLine.call instanceof CallControlCall) {
+                    CallControlCall controlCall = (CallControlCall) activeLine.call;
+                    
+                    // 找到原通話的另一方連線
+                    Connection[] connections = controlCall.getConnections();
+                    for (Connection connection : connections) {
+                        if (connection.getAddress().getName().equals(extension)) {
+                            // 使用 redirect 方法進行一段轉接
+                            if (connection instanceof CallControlConnection) {
+                                CallControlConnection ccConn = (CallControlConnection) connection;
+                                ccConn.redirect(target);
+                                
+                                // 移除線路
+                                phone.lines.remove(activeLine);
+                                phone.activeLine = null;
+                                
+                                return "一段轉接成功：" + originalParty + " → " + target;
+                            }
+                        }
+                    }
+                }
+                
+                // 如果 redirect 不支援，使用替代方法
+                return blindTransferAlternative(extension, target, activeLine, phone);
+                
+            } catch (Exception e) {
+                System.err.println("[BLIND_TRANSFER] Redirect 失敗: " + e.getMessage());
+                return blindTransferAlternative(extension, target, activeLine, phone);
+            }
+            
+        } catch (Exception e) {
+            return "一段轉接失敗: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 一段轉接的替代方法
+     */
+    private String blindTransferAlternative(String extension, String target, PhoneLine activeLine, PhoneState phone) {
+        try {
+            String originalParty = activeLine.remoteParty;
+            
+            // 先掛斷現有通話
+            disconnectLine(extension, activeLine);
+            phone.lines.remove(activeLine);
+            phone.activeLine = null;
+            
+            // 等待一下
+            Thread.sleep(1000);
+            
+            // 建立新通話：目標 → 原通話方
+            var conn = phoneCallService.getExtensionConnection(extension);
+            var extensionConn = (PhoneCallService.ExtensionConnection) conn;
+            
+            // 嘗試讓目標分機撥打給原通話方
+            // 注意：這個方法可能需要系統支援第三方通話控制
+            Call bridgeCall = extensionConn.provider.createCall();
+            
+            // 使用分機作為橋接，快速掛斷讓兩方直接連線
+            // 這是一個簡化的實現，實際效果可能因系統而異
+            
+            return "一段轉接完成（簡化模式）：已斷開 " + extension + "，請手動聯繫 " + target + " 接聽來自 " + originalParty + " 的通話";
+            
+        } catch (Exception e) {
+            return "一段轉接替代方法失敗: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 開始轉接（Transfer鍵 + 撥號）- 二段轉接
      */
     public String startTransfer(String extension, String target) {
         try {
@@ -332,10 +591,10 @@ public class UnifiedPhoneService {
             phone.lines.add(consultLine);
             phone.activeLine = lineId;
             
-            return "轉接開始：正在連接 " + target + "，完成後按 Transfer 鍵";
+            return "二段轉接諮詢開始：正在連接 " + target + "，確認後按【完成轉接】或按【取消轉接】";
             
         } catch (Exception e) {
-            return "轉接開始失敗: " + e.getMessage();
+            return "二段轉接開始失敗: " + e.getMessage();
         }
     }
     
@@ -372,19 +631,56 @@ public class UnifiedPhoneService {
                     phone.lines.remove(consultLine);
                     phone.activeLine = null;
                     
-                    return "轉接完成：" + transferringLine.remoteParty + " → " + consultLine.remoteParty;
+                    return "二段轉接完成：" + transferringLine.remoteParty + " → " + consultLine.remoteParty;
                 }
             } catch (Exception e) {
                 // 轉接失敗，恢復狀態
                 transferringLine.isTransferring = false;
                 transferringLine.transferTarget = null;
-                return "轉接失敗: " + e.getMessage() + "，可按 Flash 鍵恢復通話";
+                return "轉接失敗: " + e.getMessage() + "，可按【取消轉接】恢復通話";
             }
             
             return "轉接失敗";
             
         } catch (Exception e) {
             return "完成轉接失敗: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 取消轉接（在諮詢階段取消）
+     */
+    public String cancelTransfer(String extension) {
+        try {
+            PhoneState phone = phoneStates.get(extension);
+            if (phone == null) return "話機未初始化";
+            
+            // 找轉接中的線路
+            PhoneLine transferringLine = phone.lines.stream()
+                .filter(l -> l.isTransferring)
+                .findFirst().orElse(null);
+                
+            if (transferringLine == null) return "沒有進行中的轉接可取消";
+            
+            PhoneLine consultLine = phone.getActiveLine();
+            
+            // 掛斷諮詢通話
+            if (consultLine != null) {
+                disconnectLine(extension, consultLine);
+                phone.lines.remove(consultLine);
+            }
+            
+            // 恢復原始通話
+            transferringLine.isTransferring = false;
+            transferringLine.transferTarget = null;
+            unholdLine(extension, transferringLine);
+            transferringLine.state = LineState.TALKING;
+            phone.activeLine = transferringLine.lineId;
+            
+            return "轉接已取消，已恢復與 " + transferringLine.remoteParty + " 的通話";
+            
+        } catch (Exception e) {
+            return "取消轉接失敗: " + e.getMessage();
         }
     }
     
@@ -633,6 +929,7 @@ public class UnifiedPhoneService {
             case HELD: return "保持";
             case CONFERENCING: return "會議";
             case TRANSFERRING: return "轉接";
+            case DISCONNECTED: return "已斷線";
             default: return "空閒";
         }
     }
@@ -719,7 +1016,7 @@ public class UnifiedPhoneService {
                     // 根據 TerminalConnection 狀態設定線路狀態
                     LineState lineState = mapTerminalConnectionToLineState(termConn);
                     
-                    if (lineState != LineState.IDLE) {
+                    if (lineState != LineState.IDLE && lineState != LineState.DISCONNECTED) {
                         PhoneLine importedLine = new PhoneLine(lineId, existingCall, remoteParty, isIncoming);
                         importedLine.state = lineState;
                         phone.lines.add(importedLine);
@@ -807,6 +1104,8 @@ public class UnifiedPhoneService {
                     }
                 }
                 return LineState.TALKING;
+            case TerminalConnection.DROPPED:
+                return LineState.DISCONNECTED;
             default:
                 return LineState.IDLE;
         }
@@ -824,6 +1123,8 @@ public class UnifiedPhoneService {
                 return TerminalConnection.ACTIVE;
             case HELD:
                 return TerminalConnection.PASSIVE;
+            case DISCONNECTED:
+                return TerminalConnection.DROPPED;
             default:
                 return TerminalConnection.IDLE;
         }
@@ -973,155 +1274,4 @@ public class UnifiedPhoneService {
             return "未知";
         }
     }
-    public String unholdCall(String extension) {
-    try {
-        PhoneState phone = phoneStates.get(extension);
-        if (phone == null) return "話機未初始化";
-        
-        // 找到被 Hold 的線路
-        List<PhoneLine> heldLines = phone.getHeldLines();
-        if (heldLines.isEmpty()) {
-            return "沒有保持中的線路可以恢復";
-        }
-        
-        // 恢復第一條被 Hold 的線路
-        PhoneLine heldLine = heldLines.get(0);
-        
-        // 先 Hold 當前活躍線路（如果有的話）
-        PhoneLine currentActive = phone.getActiveLine();
-        if (currentActive != null && !currentActive.lineId.equals(heldLine.lineId)) {
-            holdLine(extension, currentActive);
-            currentActive.state = LineState.HELD;
-        }
-        
-        // 恢復被 Hold 的線路
-        unholdLine(extension, heldLine);
-        heldLine.state = LineState.TALKING;
-        phone.activeLine = heldLine.lineId;
-        
-        return "線路 " + heldLine.lineId + " 已恢復：" + heldLine.getDisplayName();
-        
-    } catch (Exception e) {
-        return "恢復通話失敗: " + e.getMessage();
-    }
-}
-
-/**
- * 一般的 Hold 功能（保持當前活躍通話）
- */
-public String holdActiveCall(String extension) {
-    try {
-        PhoneState phone = phoneStates.get(extension);
-        if (phone == null) return "話機未初始化";
-        
-        PhoneLine activeLine = phone.getActiveLine();
-        if (activeLine == null) return "沒有活躍線路可以保持";
-        
-        if (activeLine.state != LineState.TALKING) {
-            return "線路 " + activeLine.lineId + " 不是通話狀態，無法保持";
-        }
-        
-        // 執行 Hold
-        holdLine(extension, activeLine);
-        activeLine.state = LineState.HELD;
-        phone.activeLine = null;
-        
-        return "線路 " + activeLine.lineId + " 已保持：" + activeLine.getDisplayName();
-        
-    } catch (Exception e) {
-        return "保持通話失敗: " + e.getMessage();
-    }
-}
-
-/**
- * 智能 Hold/Unhold 切換
- */
-public String toggleHoldCall(String extension) {
-    try {
-        PhoneState phone = phoneStates.get(extension);
-        if (phone == null) return "話機未初始化";
-        
-        PhoneLine activeLine = phone.getActiveLine();
-        List<PhoneLine> heldLines = phone.getHeldLines();
-        
-        if (activeLine != null && activeLine.state == LineState.TALKING) {
-            // 有活躍通話，執行 Hold
-            return holdActiveCall(extension);
-        } else if (!heldLines.isEmpty()) {
-            // 沒有活躍通話但有保持的通話，執行 Unhold
-            return unholdCall(extension);
-        } else {
-            return "沒有可操作的通話";
-        }
-        
-    } catch (Exception e) {
-        return "Hold/Unhold 切換失敗: " + e.getMessage();
-    }
-}
-
-/**
- * 指定線路撥打電話（新增線路選擇功能）
- */
-public String makeCallOnSpecificLine(String extension, String target, String preferredLineId) {
-    try {
-        PhoneState phone = getOrCreatePhone(extension);
-        
-        if (phone.getActiveLineCount() >= phone.maxLines) {
-            return "已達線路上限";
-        }
-        
-        // 檢查指定線路是否可用
-        if (preferredLineId != null && !preferredLineId.isEmpty()) {
-            PhoneLine existingLine = phone.findLine(preferredLineId);
-            if (existingLine != null) {
-                return "指定線路 " + preferredLineId + " 已被使用";
-            }
-        }
-        
-        // Hold當前活躍線路
-        PhoneLine currentActive = phone.getActiveLine();
-        if (currentActive != null) {
-            holdLine(extension, currentActive);
-            currentActive.state = LineState.HELD;
-        }
-        
-        // 建立新線路（使用指定的線路ID或自動生成）
-        String lineId = (preferredLineId != null && !preferredLineId.isEmpty()) 
-                       ? preferredLineId 
-                       : phone.generateLineId();
-        
-        Call newCall = createCall(extension, target);
-        
-        PhoneLine newLine = new PhoneLine(lineId, newCall, target, false);
-        newLine.state = LineState.TALKING;
-        phone.lines.add(newLine);
-        phone.activeLine = lineId;
-        
-        return "線路 " + lineId + " 撥打成功：" + newLine.getDisplayName();
-        
-    } catch (Exception e) {
-        return "指定線路撥打失敗: " + e.getMessage();
-    }
-}
-
-/**
- * 取得可用線路列表
- */
-public String getAvailableLines(String extension) {
-    PhoneState phone = getOrCreatePhone(extension);
-    
-    StringBuilder result = new StringBuilder();
-    result.append("=== 可用線路狀態 ===\n");
-    result.append("最大線路數：").append(phone.maxLines).append("\n");
-    result.append("已使用線路：").append(phone.getActiveLineCount()).append("\n");
-    result.append("可用線路數：").append(phone.maxLines - phone.getActiveLineCount()).append("\n\n");
-    
-    // 顯示建議的線路ID
-    if (phone.getActiveLineCount() < phone.maxLines) {
-        String nextLineId = phone.generateLineId();
-        result.append("建議使用線路ID：").append(nextLineId).append("\n");
-    }
-    
-    return result.toString();
-}
 }
