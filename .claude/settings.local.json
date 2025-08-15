@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn compile:*)",
+      "Bash(.mvnw.cmd clean compile)",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/unified-phone/test?ext=1420\")",
+      "Bash(./mvnw.cmd:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:support.avaya.com)",
+      "Bash(curl:*)",
+      "Bash(mvn clean:*)",
+      "Bash(cp:*)",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/agent/status?extension=1420\")",
+      "Bash(timeout 15 curl -X GET \"http://localhost:8080/api/agent/login?extension=1420&agentId=2420\")",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/agent/manual-in?extension=1420\")",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/unified-phone/make-call?extension=1420&target=1013\")",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/phone/call?caller=1420&callee=1013\")",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/unified-phone/status?ext=1420\")",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/unified-phone/hangup?ext=1420\")",
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/phone/hangup?extension=1420\")"
+    ],
+    "deny": []
+  }
+}

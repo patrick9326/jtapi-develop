@@ -87,6 +87,16 @@ public class ConferenceController {
     }
     
     /**
+     * 清理無效會話
+     * GET /api/conference/cleanup-invalid
+     */
+    @GetMapping("/cleanup-invalid")
+    public String cleanupInvalidSessions() {
+        conferenceService.cleanupInvalidSessions();
+        return "無效會話清理完成";
+    }
+    
+    /**
      * 檢查會議準備狀態
      * GET /api/conference/validate-readiness?host=1420
      */

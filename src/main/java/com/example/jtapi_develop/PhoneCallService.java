@@ -1,5 +1,7 @@
 package com.example.jtapi_develop;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
 import javax.telephony.*;
 import javax.telephony.callcontrol.*;
@@ -9,6 +11,12 @@ import java.util.Map;
 
 @Service
 public class PhoneCallService {
+    
+    @Autowired
+    private ApplicationContext applicationContext;
+    
+    @Autowired
+    private MethodLogService methodLogService;
     
     // 存儲每個分機/用戶的連線信息
     private final ConcurrentHashMap<String, ExtensionConnection> extensions = new ConcurrentHashMap<>();
@@ -167,12 +175,18 @@ public class PhoneCallService {
         try {
             System.out.println("[CALL] 嘗試撥打: " + callerExt + " → " + calleeExt);
             
+            // 檢查被叫方Agent狀態
+            if (!isAgentAvailable(calleeExt)) {
+                return "撥打失敗: 分機 " + calleeExt + " 的Agent目前不接受來電";
+            }
+            
             // 方法1: 檢查分機是否直接登入
             ExtensionConnection directConn = extensions.get(callerExt);
             if (directConn != null && directConn.isReady && directConn.terminal != null) {
                 System.out.println("[CALL] 使用直接登入模式");
                 Call call = directConn.provider.createCall();
                 call.connect(directConn.terminal, directConn.address, calleeExt);
+                methodLogService.logSuccess("撥號", "直接登入模式", "使用分機直接登入撥號", callerExt, calleeExt);
                 return "分機 " + callerExt + " 正在撥打給 " + calleeExt + " (直接模式)";
             }
             
@@ -245,11 +259,13 @@ public class PhoneCallService {
             call.connect(callerTerminal, callerAddress, calleeExt);
             
             System.out.println("[CALL] CTI 控制成功：" + callerExt + " → " + calleeExt);
+            methodLogService.logSuccess("撥號", "CTI控制模式", "使用CTI控制分機撥號", callerExt, calleeExt);
             return "CTI 控制：分機 " + callerExt + " 正在撥打給 " + calleeExt;
             
         } catch (Exception e) {
             System.err.println("[CALL] 撥打失敗: " + e.getMessage());
             e.printStackTrace();
+            methodLogService.logFailure("撥號", "撥號失敗", e.getMessage(), callerExt, calleeExt);
             return "撥打失敗: " + e.getMessage();
         }
     }
@@ -264,20 +280,34 @@ public class PhoneCallService {
             // 檢查分機是否直接登入
             ExtensionConnection directConn = extensions.get(extension);
             if (directConn != null && directConn.isReady && directConn.terminal != null) {
-                return answerCallDirect(extension, directConn);
+                String result = answerCallDirect(extension, directConn);
+                if (result.contains("已接聽")) {
+                    methodLogService.logSuccess("接聽", "直接模式", "使用分機直接登入接聽", extension, null);
+                } else {
+                    methodLogService.logFailure("接聽", "直接模式", result, extension, null);
+                }
+                return result;
             }
             
             // 使用 CTI 控制模式
             ExtensionConnection ctiConn = findCTIConnection();
             if (ctiConn == null) {
+                methodLogService.logFailure("接聽", "CTI控制模式", "沒有可用的CTI連線", extension, null);
                 return "錯誤：沒有可用的 CTI 連線";
             }
             
-            return answerCallByCTI(extension, ctiConn);
+            String result = answerCallByCTI(extension, ctiConn);
+            if (result.contains("已接聽")) {
+                methodLogService.logSuccess("接聽", "CTI控制模式", "使用CTI控制接聽", extension, null);
+            } else {
+                methodLogService.logFailure("接聽", "CTI控制模式", result, extension, null);
+            }
+            return result;
             
         } catch (Exception e) {
             System.err.println("[ANSWER] 接聽失敗: " + e.getMessage());
             e.printStackTrace();
+            methodLogService.logFailure("接聽", "接聽失敗", e.getMessage(), extension, null);
             return "接聽失敗: " + e.getMessage();
         }
     }
@@ -292,20 +322,34 @@ public class PhoneCallService {
             // 檢查分機是否直接登入
             ExtensionConnection directConn = extensions.get(extension);
             if (directConn != null && directConn.isReady && directConn.terminal != null) {
-                return hangupCallDirect(extension, directConn);
+                String result = hangupCallDirect(extension, directConn);
+                if (result.contains("已掛斷")) {
+                    methodLogService.logSuccess("掛斷", "直接模式", "使用分機直接登入掛斷", extension, null);
+                } else {
+                    methodLogService.logFailure("掛斷", "直接模式", result, extension, null);
+                }
+                return result;
             }
             
             // 使用 CTI 控制模式
             ExtensionConnection ctiConn = findCTIConnection();
             if (ctiConn == null) {
+                methodLogService.logFailure("掛斷", "CTI控制模式", "沒有可用的CTI連線", extension, null);
                 return "錯誤：沒有可用的 CTI 連線";
             }
             
-            return hangupCallByCTI(extension, ctiConn);
+            String result = hangupCallByCTI(extension, ctiConn);
+            if (result.contains("已掛斷")) {
+                methodLogService.logSuccess("掛斷", "CTI控制模式", "使用CTI控制掛斷", extension, null);
+            } else {
+                methodLogService.logFailure("掛斷", "CTI控制模式", result, extension, null);
+            }
+            return result;
             
         } catch (Exception e) {
             System.err.println("[HANGUP] 掛斷失敗: " + e.getMessage());
             e.printStackTrace();
+            methodLogService.logFailure("掛斷", "掛斷失敗", e.getMessage(), extension, null);
             return "掛斷失敗: " + e.getMessage();
         }
     }
@@ -363,6 +407,26 @@ public class PhoneCallService {
      * 提供給其他服務存取連線信息的方法
      * 讓 TransferService 可以取得分機連線
      */
+    /**
+     * 取得所有分機連線 (供 AgentService 查詢所有 Agent 使用)
+     */
+    public ConcurrentHashMap<String, ExtensionConnection> getAllExtensionConnections() {
+        return extensions;
+    }
+    
+    /**
+     * 取得 Provider (供 AgentService 使用)
+     */
+    public Provider getProvider() {
+        // 嘗試找到任何可用的 Provider
+        for (ExtensionConnection conn : extensions.values()) {
+            if (conn.isReady && conn.provider != null) {
+                return conn.provider;
+            }
+        }
+        return null;
+    }
+    
     public ExtensionConnection getExtensionConnection(String extension) {
         // 先檢查直接登入的分機
         ExtensionConnection directConn = extensions.get(extension);
@@ -400,6 +464,28 @@ public class PhoneCallService {
         }
         
         return null;
+    }
+    
+    /**
+     * 清理指定分機的連線（用於 Agent 硬登出）
+     */
+    public void clearExtensionConnection(String extension) {
+        ExtensionConnection conn = extensions.get(extension);
+        if (conn != null) {
+            try {
+                // 關閉 Provider 連線
+                if (conn.provider != null) {
+                    conn.provider.shutdown();
+                }
+                
+                // 從連線池中移除
+                extensions.remove(extension);
+                System.out.println("[" + extension + "] 連線已從池中清理");
+                
+            } catch (Exception e) {
+                System.err.println("[" + extension + "] 清理連線時發生錯誤: " + e.getMessage());
+            }
+        }
     }
     
     /**
@@ -626,6 +712,70 @@ public class PhoneCallService {
             
         } catch (Exception e) {
             return "CTI 控制掛斷失敗: " + e.getMessage();
+        }
+    }
+    
+    // ========================================
+    // Agent狀態檢查功能
+    // ========================================
+    
+    /**
+     * 檢查Agent是否可接受來電
+     */
+    public boolean isAgentAvailable(String extension) {
+        try {
+            // 使用ApplicationContext來避免循環依賴
+            AgentService agentService = applicationContext.getBean(AgentService.class);
+            
+            // 先檢查Agent是否登入
+            String agentStatus = agentService.getAgentStatus(extension);
+            
+            // 如果沒有Agent登入，則允許通話（普通分機模式）
+            if (agentStatus.contains("沒有 Agent 登入")) {
+                System.out.println("[AGENT_CHECK] 分機 " + extension + " 沒有Agent登入，允許通話");
+                return true;
+            }
+            
+            // 有Agent登入，檢查狀態
+            if (agentStatus.contains("待機中")) {
+                System.out.println("[AGENT_CHECK] 分機 " + extension + " Agent處於待機狀態，允許通話");
+                return true;
+            } else if (agentStatus.contains("忙碌中") || agentStatus.contains("休息中")) {
+                System.out.println("[AGENT_CHECK] 分機 " + extension + " Agent處於" + 
+                                 (agentStatus.contains("忙碌中") ? "忙碌" : "休息") + "狀態，拒絕通話");
+                return false;
+            }
+            
+            // 其他狀態預設允許
+            return true;
+            
+        } catch (Exception e) {
+            System.err.println("[AGENT_CHECK] 檢查Agent狀態失敗: " + e.getMessage());
+            // 發生錯誤時預設允許通話
+            return true;
+        }
+    }
+    
+    /**
+     * 檢查分機是否可接受來電（對外API）
+     */
+    public String checkExtensionAvailability(String extension) {
+        if (isAgentAvailable(extension)) {
+            return "分機 " + extension + " 可接受來電";
+        } else {
+            try {
+                AgentService agentService = applicationContext.getBean(AgentService.class);
+                String agentStatus = agentService.getAgentStatus(extension);
+                if (agentStatus.contains("忙碌中")) {
+                    return "分機 " + extension + " 的Agent處於忙碌狀態，暫時無法接受來電";
+                } else if (agentStatus.contains("休息中")) {
+                    return "分機 " + extension + " 的Agent處於休息狀態，暫時無法接受來電";
+                } else {
+                    return "分機 " + extension + " 暫時無法接受來電";
+                }
+            } catch (Exception e) {
+                return "分機 " + extension + " 暫時無法接受來電";
+            }
         }
     }
 }

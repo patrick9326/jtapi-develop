@@ -7,6 +7,7 @@ import javax.telephony.callcontrol.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ConferenceService {
@@ -47,6 +48,9 @@ public class ConferenceService {
         try {
             System.out.println("[CONFERENCE] 開始三方通話: " + hostExtension + " 邀請 " + invitedExtension);
             
+            // 清理可能的無效會話
+            cleanupInvalidSessions();
+            
             // 檢查是否已有會議進行中
             if (extensionToSessionMap.containsKey(hostExtension)) {
                 return "錯誤：分機 " + hostExtension + " 已有進行中的會議";
@@ -69,7 +73,7 @@ public class ConferenceService {
             Connection[] connections = originalCall.getConnections();
             for (Connection connection : connections) {
                 String addressName = connection.getAddress().getName();
-                if (!addressName.equals(hostExtension) && !addressName.startsWith("49")) {
+                if (!addressName.equals(hostExtension)) {
                     originalParticipant = addressName;
                     break;
                 }
@@ -633,6 +637,97 @@ public class ConferenceService {
             }
             return false;
         });
+    }
+    
+    /**
+     * 清理無效的會議會話（通話已結束但會話還在）
+     */
+    public void cleanupInvalidSessions() {
+        List<String> toRemove = new ArrayList<>();
+        
+        for (Map.Entry<String, ConferenceSession> entry : activeSessions.entrySet()) {
+            ConferenceSession session = entry.getValue();
+            boolean isInvalid = false;
+            
+            try {
+                // 檢查原始通話是否還有效
+                if (session.originalCall != null) {
+                    int callState = session.originalCall.getState();
+                    if (callState == Call.INVALID) {
+                        System.out.println("[CONFERENCE_CLEANUP] 原始通話已失效: " + entry.getKey());
+                        isInvalid = true;
+                    } else {
+                        // 檢查是否還有連線
+                        Connection[] connections = session.originalCall.getConnections();
+                        boolean hasActiveConnection = false;
+                        for (Connection conn : connections) {
+                            if (conn.getState() == Connection.CONNECTED) {
+                                hasActiveConnection = true;
+                                break;
+                            }
+                        }
+                        if (!hasActiveConnection) {
+                            System.out.println("[CONFERENCE_CLEANUP] 原始通話無活躍連線: " + entry.getKey());
+                            isInvalid = true;
+                        }
+                    }
+                }
+                
+                // 檢查諮詢通話是否還有效
+                if (session.consultCall != null) {
+                    int consultCallState = session.consultCall.getState();
+                    if (consultCallState == Call.INVALID) {
+                        System.out.println("[CONFERENCE_CLEANUP] 諮詢通話已失效: " + entry.getKey());
+                        // 如果只是諮詢通話失效但會議還沒建立，這是正常的取消情況
+                        if (!session.isActive) {
+                            isInvalid = true;
+                        }
+                    }
+                }
+                
+                // 如果會議通話失效
+                if (session.conferenceCall != null && session.isActive) {
+                    int confCallState = session.conferenceCall.getState();
+                    if (confCallState == Call.INVALID) {
+                        System.out.println("[CONFERENCE_CLEANUP] 會議通話已失效: " + entry.getKey());
+                        isInvalid = true;
+                    } else {
+                        // 檢查會議參與者數量
+                        Connection[] confConnections = session.conferenceCall.getConnections();
+                        int activeParticipants = 0;
+                        for (Connection conn : confConnections) {
+                            if (conn.getState() == Connection.CONNECTED) {
+                                activeParticipants++;
+                            }
+                        }
+                        if (activeParticipants < 2) {
+                            System.out.println("[CONFERENCE_CLEANUP] 會議參與者不足: " + entry.getKey() + " (僅" + activeParticipants + "人)");
+                            isInvalid = true;
+                        }
+                    }
+                }
+                
+            } catch (Exception e) {
+                System.err.println("[CONFERENCE_CLEANUP] 檢查會話時發生錯誤: " + e.getMessage());
+                isInvalid = true;
+            }
+            
+            if (isInvalid) {
+                toRemove.add(entry.getKey());
+                extensionToSessionMap.remove(session.hostExtension);
+                System.out.println("[CONFERENCE_CLEANUP] 標記清理無效會話: " + entry.getKey());
+            }
+        }
+        
+        // 移除無效會話
+        for (String sessionId : toRemove) {
+            activeSessions.remove(sessionId);
+            System.out.println("[CONFERENCE_CLEANUP] 已清理無效會話: " + sessionId);
+        }
+        
+        if (!toRemove.isEmpty()) {
+            System.out.println("[CONFERENCE_CLEANUP] 總共清理了 " + toRemove.size() + " 個無效會話");
+        }
     }
     
     // === 輔助方法 ===

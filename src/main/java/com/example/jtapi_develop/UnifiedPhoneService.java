@@ -1,6 +1,7 @@
 package com.example.jtapi_develop;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
 import javax.telephony.*;
 import javax.telephony.callcontrol.*;
@@ -17,6 +18,9 @@ public class UnifiedPhoneService {
     
     @Autowired
     private PhoneCallService phoneCallService;
+    
+    @Autowired
+    private ApplicationContext applicationContext;
     
     /**
      * 話機線路狀態
@@ -74,7 +78,7 @@ public class UnifiedPhoneService {
         public String extension;
         public List<PhoneLine> lines;           // 所有線路
         public String activeLine;              // 當前活躍線路
-        public int maxLines = 6;               // 最大線路數
+        public int maxLines = 3;               // 最大線路數（1420分機實際支援3條）
         private int nextLineNumber = 1;
         
         public PhoneState(String extension) {
@@ -159,7 +163,15 @@ public class UnifiedPhoneService {
      */
     public String makeCall(String extension, String target) {
         try {
+            // 檢查目標分機Agent狀態
+            if (!isAgentAvailable(target)) {
+                return "撥打失敗: 目標分機 " + target + " 的Agent目前不接受來電";
+            }
+            
             PhoneState phone = getOrCreatePhone(extension);
+            
+            // 清理斷開的線路，防止累積無效資料
+            cleanupDisconnectedLines(phone);
             
             if (phone.getActiveLineCount() >= phone.maxLines) {
                 return "已達線路上限";
@@ -211,7 +223,15 @@ public class UnifiedPhoneService {
                 return "線路 " + activeLine.lineId + " 已掛斷，切換到 " + nextLine.lineId;
             } else {
                 phone.activeLine = null;
-                return "線路 " + activeLine.lineId + " 已掛斷";
+                
+                // 檢查 Agent 模式，如果是 Manual-in 則自動切換到 AUX
+                String result = "線路 " + activeLine.lineId + " 已掛斷";
+                String auxResult = checkAndSwitchToAuxIfManualIn(extension);
+                if (auxResult != null) {
+                    result += "\n" + auxResult;
+                }
+                
+                return result;
             }
             
         } catch (Exception e) {
@@ -407,7 +427,15 @@ public class UnifiedPhoneService {
      */
     public String makeCallOnSpecificLine(String extension, String target, String preferredLineId) {
         try {
+            // 檢查目標分機Agent狀態
+            if (!isAgentAvailable(target)) {
+                return "撥打失敗: 目標分機 " + target + " 的Agent目前不接受來電";
+            }
+            
             PhoneState phone = getOrCreatePhone(extension);
+            
+            // 清理斷開的線路，防止累積無效資料
+            cleanupDisconnectedLines(phone);
             
             // 檢查指定線路是否真的可用
             if (preferredLineId != null) {
@@ -456,13 +484,13 @@ public class UnifiedPhoneService {
     }
 
     /**
-     * 取得可用線路列表
+     * 取得可用線路列表 (本地狀態)
      */
     public String getAvailableLines(String extension) {
         PhoneState phone = getOrCreatePhone(extension);
         
         StringBuilder result = new StringBuilder();
-        result.append("=== 可用線路狀態 ===\n");
+        result.append("=== 可用線路狀態 (本地) ===\n");
         result.append("最大線路數：").append(phone.maxLines).append("\n");
         result.append("已使用線路：").append(phone.getActiveLineCount()).append("\n");
         result.append("可用線路數：").append(phone.maxLines - phone.getActiveLineCount()).append("\n\n");
@@ -471,6 +499,162 @@ public class UnifiedPhoneService {
         if (phone.getActiveLineCount() < phone.maxLines) {
             String nextLineId = phone.generateLineId();
             result.append("建議使用線路ID：").append(nextLineId).append("\n");
+        }
+        
+        return result.toString();
+    }
+    
+    /**
+     * 從Server查詢實際可用線路數量
+     */
+    public String getServerAvailableLines(String extension) {
+        StringBuilder result = new StringBuilder();
+        result.append("=== Server端實際線路狀態 ===\n");
+        result.append("分機：").append(extension).append("\n");
+        result.append("查詢時間：").append(new java.util.Date()).append("\n\n");
+        
+        try {
+            // 從Server獲取實際連線狀態
+            var conn = phoneCallService.getExtensionConnection(extension);
+            if (conn == null) {
+                result.append("❌ 分機未連線到CTI系統\n");
+                return result.toString();
+            }
+            
+            var extensionConn = (PhoneCallService.ExtensionConnection) conn;
+            if (extensionConn.terminal == null) {
+                result.append("❌ 分機終端不可用\n");
+                return result.toString();
+            }
+            
+            // 查詢Server端的終端連線
+            TerminalConnection[] termConnections = extensionConn.terminal.getTerminalConnections();
+            int activeConnections = 0;
+            int ringingConnections = 0;
+            int heldConnections = 0;
+            int totalConnections = 0;
+            
+            if (termConnections != null) {
+                totalConnections = termConnections.length;
+                result.append("Server回報終端連線數：").append(totalConnections).append("\n\n");
+                
+                for (int i = 0; i < termConnections.length; i++) {
+                    TerminalConnection termConn = termConnections[i];
+                    int state = termConn.getState();
+                    
+                    result.append("連線 ").append(i + 1).append(": ");
+                    
+                    switch (state) {
+                        case TerminalConnection.ACTIVE:
+                            result.append("🟢 通話中 (ACTIVE)");
+                            activeConnections++;
+                            break;
+                        case TerminalConnection.RINGING:
+                            result.append("🔔 響鈴中 (RINGING)");
+                            ringingConnections++;
+                            break;
+                        case TerminalConnection.PASSIVE:
+                            result.append("🟡 被動狀態 (PASSIVE)");
+                            break;
+                        case TerminalConnection.DROPPED:
+                            result.append("❌ 已斷開 (DROPPED)");
+                            break;
+                        case TerminalConnection.IDLE:
+                            result.append("⚪ 空閒 (IDLE)");
+                            break;
+                        case TerminalConnection.UNKNOWN:
+                            result.append("❓ 未知 (UNKNOWN)");
+                            break;
+                        default:
+                            result.append("❓ 狀態碼: " + state);
+                    }
+                    
+                    try {
+                        // 獲取通話資訊
+                        Call call = termConn.getConnection().getCall();
+                        if (call != null) {
+                            Connection[] callConnections = call.getConnections();
+                            if (callConnections != null) {
+                                result.append(" [通話方數: ").append(callConnections.length).append("]");
+                            } else {
+                                result.append(" [通話方數: 0]");
+                            }
+                            
+                            // 檢查是否為Hold狀態 (根據JTAPI標準)
+                            if (termConn instanceof javax.telephony.callcontrol.CallControlTerminalConnection) {
+                                javax.telephony.callcontrol.CallControlTerminalConnection cctc = 
+                                    (javax.telephony.callcontrol.CallControlTerminalConnection) termConn;
+                                int callControlState = cctc.getCallControlState();
+                                
+                                // 詳細狀態檢查
+                                switch (callControlState) {
+                                    case javax.telephony.callcontrol.CallControlTerminalConnection.HELD:
+                                        result.append(" 🟠 [HELD]");
+                                        heldConnections++;
+                                        // 如果是Hold狀態，修改主要狀態顯示
+                                        if (state == TerminalConnection.ACTIVE) {
+                                            result.setLength(result.length() - "🟢 通話中 (ACTIVE)".length());
+                                            result.append("🟠 Hold中 (HELD)");
+                                        }
+                                        break;
+                                    case javax.telephony.callcontrol.CallControlTerminalConnection.TALKING:
+                                        result.append(" 💬 [TALKING]");
+                                        break;
+                                    case javax.telephony.callcontrol.CallControlTerminalConnection.RINGING:
+                                        result.append(" 📞 [CC_RINGING]");
+                                        break;
+                                    case javax.telephony.callcontrol.CallControlTerminalConnection.BRIDGED:
+                                        result.append(" 🌉 [BRIDGED]");
+                                        break;
+                                    case javax.telephony.callcontrol.CallControlTerminalConnection.INUSE:
+                                        result.append(" 📱 [INUSE]");
+                                        break;
+                                }
+                            }
+                            
+                            // 找到對方號碼
+                            for (Connection callConn : callConnections) {
+                                String addr = callConn.getAddress().getName();
+                                if (!addr.equals(extension)) {
+                                    result.append(" ↔ ").append(addr);
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        result.append(" [查詢通話資訊失敗: ").append(e.getMessage()).append("]");
+                    }
+                    
+                    result.append("\n");
+                }
+            } else {
+                result.append("Server回報：無終端連線\n");
+            }
+            
+            // 統計摘要
+            result.append("\n=== 統計摘要 ===\n");
+            result.append("總連線數：").append(totalConnections).append("\n");
+            result.append("通話中：").append(activeConnections).append("\n");
+            result.append("響鈴中：").append(ringingConnections).append("\n");
+            result.append("Hold中：").append(heldConnections).append("\n");
+            
+            // 計算可用線路數（基於Avaya系統通常的限制）
+            int busyLines = activeConnections + ringingConnections + heldConnections;
+            int maxLines = 3; // 1420分機實際支援3條線路
+            int availableLines = maxLines - busyLines;
+            
+            result.append("忙線數：").append(busyLines).append("\n");
+            result.append("預估可用線路：").append(Math.max(0, availableLines)).append("/").append(maxLines).append("\n");
+            
+            if (availableLines > 0) {
+                result.append("✅ 可以建立新通話\n");
+            } else {
+                result.append("❌ 已達線路上限，無法建立新通話\n");
+            }
+            
+        } catch (Exception e) {
+            result.append("❌ 查詢Server狀態失敗：").append(e.getMessage()).append("\n");
+            e.printStackTrace();
         }
         
         return result.toString();
@@ -568,6 +752,11 @@ public class UnifiedPhoneService {
      */
     public String startTransfer(String extension, String target) {
         try {
+            // 檢查轉接目標Agent狀態
+            if (!isAgentAvailable(target)) {
+                return "轉接失敗: 目標分機 " + target + " 的Agent目前不接受來電";
+            }
+            
             PhoneState phone = phoneStates.get(extension);
             if (phone == null) return "話機未初始化";
             
@@ -934,6 +1123,30 @@ public class UnifiedPhoneService {
         }
     }
     
+    /**
+     * 檢查 Agent 是否處於 Manual-in 模式，提供 ACW 狀態資訊
+     */
+    private String checkAndSwitchToAuxIfManualIn(String extension) {
+        try {
+            // 獲取 AgentService
+            AgentService agentService = applicationContext.getBean(AgentService.class);
+            
+            // 檢查 Agent 狀態
+            String agentStatus = agentService.getAgentStatus(extension);
+            
+            // 如果Agent處於Manual-in模式，提醒ACW自動轉換
+            if (agentStatus.contains("手動接聽")) {
+                return "🔄 Manual-in 模式：通話結束後系統將自動切換到 ACW (話後工作) 狀態\n" +
+                       "💡 完成話後工作後，請手動點擊 Manual-in 按鈕重新就緒";
+            }
+            
+            return null; // 不是 Manual-in 模式，不需要特殊處理
+            
+        } catch (Exception e) {
+            return "⚠️ 檢查 Agent 模式時發生錯誤: " + e.getMessage();
+        }
+    }
+    
     // ========================================
     // 輔助方法
     // ========================================
@@ -1045,32 +1258,49 @@ public class UnifiedPhoneService {
     }
     
     /**
-     * 清理已斷開的線路
+     * 清理已斷開的線路（增強版）
      */
     private void cleanupDisconnectedLines(PhoneState phone) {
         phone.lines.removeIf(line -> {
             try {
                 if (line.call != null) {
                     // 檢查通話是否還有效
+                    int callState = line.call.getState();
+                    if (callState == Call.INVALID) {
+                        System.out.println("[UNIFIED_PHONE] 清理無效通話線路: " + line.lineId);
+                        return true; // 移除此線路
+                    }
+                    
                     Connection[] connections = line.call.getConnections();
+                    if (connections == null) {
+                        System.out.println("[UNIFIED_PHONE] 清理無連線的線路: " + line.lineId);
+                        return true; // 移除此線路
+                    }
+                    
                     boolean hasActiveConnection = false;
+                    int connectedCount = 0;
                     
                     for (Connection conn : connections) {
-                        if (conn.getState() != Connection.DISCONNECTED && 
-                            conn.getState() != Connection.FAILED) {
+                        int connState = conn.getState();
+                        if (connState == Connection.CONNECTED) {
+                            connectedCount++;
                             hasActiveConnection = true;
-                            break;
+                        } else if (connState != Connection.DISCONNECTED && 
+                                  connState != Connection.FAILED) {
+                            hasActiveConnection = true;
                         }
                     }
                     
-                    if (!hasActiveConnection) {
-                        System.out.println("[UNIFIED_PHONE] 清理斷開的線路: " + line.lineId);
+                    // 如果沒有活躍連線，或者連線數少於2（正常通話需要至少2個連線）
+                    if (!hasActiveConnection || connectedCount < 2) {
+                        System.out.println("[UNIFIED_PHONE] 清理斷開的線路: " + line.lineId + 
+                                          " (活躍連線: " + hasActiveConnection + ", 連線數: " + connectedCount + ")");
                         return true; // 移除此線路
                     }
                 }
             } catch (Exception e) {
                 // 如果檢查過程出錯，也移除此線路
-                System.out.println("[UNIFIED_PHONE] 清理異常線路: " + line.lineId);
+                System.out.println("[UNIFIED_PHONE] 清理異常線路: " + line.lineId + " - " + e.getMessage());
                 return true;
             }
             return false;
@@ -1150,10 +1380,10 @@ public class UnifiedPhoneService {
                 }
             }
             
-            // 方法2：簡單規則 - 如果對方是4位數分機號，且不是系統號碼，較可能是撥出
+            // 方法2：簡單規則 - 如果對方是4位數分機號，假設為撥出
             String remoteParty = findRemoteParty(call, localExtension);
-            if (remoteParty != null && remoteParty.matches("\\d{4}") && !remoteParty.startsWith("49")) {
-                // 4位數分機，非系統號碼，假設為撥出
+            if (remoteParty != null && remoteParty.matches("\\d{4}")) {
+                // 4位數分機號，假設為撥出
                 return false;
             }
             
@@ -1195,6 +1425,9 @@ public class UnifiedPhoneService {
         // 實現Hold邏輯
         if (line.call != null) {
             Connection[] connections = line.call.getConnections();
+            if (connections == null) {
+                throw new Exception("通話連線已失效，無法Hold");
+            }
             for (Connection connection : connections) {
                 if (connection.getAddress().getName().equals(extension)) {
                     TerminalConnection[] termConns = connection.getTerminalConnections();
@@ -1214,6 +1447,9 @@ public class UnifiedPhoneService {
         // 實現Unhold邏輯
         if (line.call != null) {
             Connection[] connections = line.call.getConnections();
+            if (connections == null) {
+                throw new Exception("通話連線已失效，無法Unhold");
+            }
             for (Connection connection : connections) {
                 if (connection.getAddress().getName().equals(extension)) {
                     TerminalConnection[] termConns = connection.getTerminalConnections();
@@ -1236,6 +1472,10 @@ public class UnifiedPhoneService {
         // 實現掛斷邏輯
         if (line.call != null) {
             Connection[] connections = line.call.getConnections();
+            if (connections == null) {
+                System.out.println("[UNIFIED_PHONE] 通話連線已失效，跳過掛斷");
+                return;
+            }
             for (Connection connection : connections) {
                 if (connection.getAddress().getName().equals(extension)) {
                     connection.disconnect();
@@ -1258,9 +1498,9 @@ public class UnifiedPhoneService {
                     continue;
                 }
                 
-                // 優先選擇4位數分機號（不是系統號碼）
-                if (addressName.matches("\\d{4}") && !addressName.startsWith("49")) {
-                    return addressName; // 找到真正的分機號，立即返回
+                // 優先選擇4位數分機號
+                if (addressName.matches("\\d{4}")) {
+                    return addressName; // 找到分機號，立即返回
                 }
                 
                 // 備選：任何非本地的號碼
@@ -1272,6 +1512,172 @@ public class UnifiedPhoneService {
             return bestMatch != null ? bestMatch : "未知";
         } catch (Exception e) {
             return "未知";
+        }
+    }
+    
+    // ========================================
+    // Agent狀態檢查功能
+    // ========================================
+    
+    /**
+     * 檢查Agent是否可接受來電
+     */
+    private boolean isAgentAvailable(String extension) {
+        try {
+            // 使用ApplicationContext來避免循環依賴
+            AgentService agentService = applicationContext.getBean(AgentService.class);
+            
+            // 先檢查Agent是否登入
+            String agentStatus = agentService.getAgentStatus(extension);
+            
+            // 如果沒有Agent登入，則允許通話（普通分機模式）
+            if (agentStatus.contains("沒有 Agent 登入")) {
+                System.out.println("[UNIFIED_AGENT_CHECK] 分機 " + extension + " 沒有Agent登入，允許通話");
+                return true;
+            }
+            
+            // 有Agent登入，檢查狀態
+            if (agentStatus.contains("待機中")) {
+                System.out.println("[UNIFIED_AGENT_CHECK] 分機 " + extension + " Agent處於待機狀態，允許通話");
+                return true;
+            } else if (agentStatus.contains("忙碌中") || agentStatus.contains("休息中")) {
+                System.out.println("[UNIFIED_AGENT_CHECK] 分機 " + extension + " Agent處於" + 
+                                 (agentStatus.contains("忙碌中") ? "忙碌" : "休息") + "狀態，拒絕通話");
+                return false;
+            }
+            
+            // 其他狀態預設允許
+            return true;
+            
+        } catch (Exception e) {
+            System.err.println("[UNIFIED_AGENT_CHECK] 檢查Agent狀態失敗: " + e.getMessage());
+            // 發生錯誤時預設允許通話
+            return true;
+        }
+    }
+    
+    /**
+     * 檢查並顯示分機Agent狀態
+     */
+    public String checkAgentStatus(String extension) {
+        try {
+            AgentService agentService = applicationContext.getBean(AgentService.class);
+            String agentStatus = agentService.getAgentStatus(extension);
+            
+            if (agentStatus.contains("沒有 Agent 登入")) {
+                return "分機 " + extension + " - 普通分機模式（未登入Agent）- 可接受來電";
+            } else if (agentStatus.contains("待機中")) {
+                return "分機 " + extension + " - Agent待機中 - 可接受來電";
+            } else if (agentStatus.contains("忙碌中")) {
+                return "分機 " + extension + " - Agent忙碌中 - 拒絕來電";
+            } else if (agentStatus.contains("休息中")) {
+                return "分機 " + extension + " - Agent休息中 - 拒絕來電";
+            } else {
+                return "分機 " + extension + " - Agent狀態未知 - " + agentStatus;
+            }
+        } catch (Exception e) {
+            return "檢查Agent狀態失敗: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 獲取所有話機的通話狀態總覽
+     */
+    public String getAllPhoneStatus() {
+        StringBuilder status = new StringBuilder();
+        status.append("=== 所有話機通話狀態總覽 ===\n");
+        status.append("查詢時間: ").append(new java.util.Date()).append("\n\n");
+        
+        // 定義要檢查的分機列表
+        String[] extensions = {"1411", "1420", "1424", "1425", "1001", "1002", "1003"};
+        
+        for (String ext : extensions) {
+            status.append("📞 分機 ").append(ext).append(":\n");
+            
+            try {
+                // 檢查是否有線路狀態
+                PhoneState phoneState = phoneStates.get(ext);
+                if (phoneState == null || phoneState.lines.isEmpty()) {
+                    status.append("   狀態: 空閒 (無活動線路)\n");
+                    
+                    // 檢查Agent狀態
+                    String agentStatus = checkAgentStatus(ext);
+                    if (!agentStatus.contains("普通分機模式")) {
+                        status.append("   Agent: ").append(agentStatus.substring(agentStatus.indexOf("Agent") + 5)).append("\n");
+                    }
+                } else {
+                    status.append("   線路數: ").append(phoneState.lines.size()).append("\n");
+                    
+                    for (PhoneLine line : phoneState.lines) {
+                        status.append("   └─ 線路 ").append(line.lineId).append(": ");
+                        status.append(getLineStateDisplay(line.state)).append(" ");
+                        
+                        if (line.remoteParty != null && !line.remoteParty.trim().isEmpty()) {
+                            status.append("對方: ").append(line.remoteParty).append(" ");
+                        }
+                        
+                        if (line.state == LineState.TALKING || line.state == LineState.CONFERENCING) {
+                            long duration = (System.currentTimeMillis() - line.startTime) / 1000;
+                            status.append("(通話時長: ").append(duration).append("秒)");
+                        }
+                        
+                        if (line.isConference) {
+                            status.append(" [會議]");
+                        }
+                        
+                        if (line.isTransferring) {
+                            status.append(" [轉接中]");
+                        }
+                        
+                        status.append("\n");
+                    }
+                    
+                    // 檢查Agent狀態
+                    String agentStatus = checkAgentStatus(ext);
+                    if (!agentStatus.contains("普通分機模式")) {
+                        status.append("   Agent: ").append(agentStatus.substring(agentStatus.indexOf("Agent") + 5)).append("\n");
+                    }
+                }
+            } catch (Exception e) {
+                status.append("   錯誤: ").append(e.getMessage()).append("\n");
+            }
+            
+            status.append("\n");
+        }
+        
+        // 統計資訊
+        status.append("=== 系統統計 ===\n");
+        int totalActiveLines = 0;
+        int busyExtensions = 0;
+        
+        for (String ext : extensions) {
+            PhoneState phoneState = phoneStates.get(ext);
+            if (phoneState != null && !phoneState.lines.isEmpty()) {
+                totalActiveLines += phoneState.lines.size();
+                busyExtensions++;
+            }
+        }
+        
+        status.append("活躍線路總數: ").append(totalActiveLines).append("\n");
+        status.append("忙碌分機數: ").append(busyExtensions).append("/").append(extensions.length).append("\n");
+        status.append("空閒分機數: ").append(extensions.length - busyExtensions).append("/").append(extensions.length).append("\n");
+        
+        return status.toString();
+    }
+    
+    /**
+     * 獲取線路狀態的顯示文字
+     */
+    private String getLineStateDisplay(LineState state) {
+        switch (state) {
+            case IDLE: return "空閒";
+            case RINGING: return "響鈴中";
+            case TALKING: return "通話中";
+            case HELD: return "保持中";
+            case CONFERENCING: return "會議中";
+            case TRANSFERRING: return "轉接中";
+            case DISCONNECTED: return "已斷線";
+            default: return "未知狀態";
         }
     }
 }
