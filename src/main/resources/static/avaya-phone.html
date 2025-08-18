@@ -1773,13 +1773,22 @@
             }
         }
 
-        async function hangupLineWithId(lineId) {
+       async function hangupLineWithId(lineId) {
             try {
-                if (!lineId) {
-                    alert('無法掛斷：未指定線路ID');
-                    return;
-                }
+                  if (!lineId) {
+                     alert('無法掛斷：未指定線路ID');
+                     return;
+                    }
                 
+                    // 檢查是否是會議通話
+        if (lineId.includes("_conf_")) {
+            const response = await fetch(`/api/conference/end?host=${currentExtension}`);
+            const result = await response.text();
+            alert(result);
+            setTimeout(() => refreshLines(), 1000);
+            return;
+        }
+        
                 // 使用統一話機API掛斷指定線路
                 const response = await fetch(`/api/unified-phone/hangup-line?ext=${currentExtension}&lineId=${encodeURIComponent(lineId)}`);
                 const result = await response.text();

@@ -256,7 +256,17 @@ public class UnifiedPhoneService {
      * 掛斷指定線路
      */
     public String hangupSpecificLine(String extension, String lineId) {
-        try {
+    try {
+        // 先檢查是否是會議通話
+        String sessionId = conferenceService.extensionToSessionMap.get(extension);
+        if (sessionId != null) {
+            ConferenceService.ConferenceSession session = conferenceService.activeSessions.get(sessionId);
+            if (session != null && session.isActive) {
+                // 使用會議服務掛斷
+                String result = conferenceService.endConference(extension);
+                return "會議掛斷結果: " + result;
+            }
+        }
             PhoneState phone = phoneStates.get(extension);
             if (phone == null) return "話機未初始化";
             
@@ -1589,13 +1599,13 @@ public class UnifiedPhoneService {
         }
     }
     
-    private void disconnectLine(String extension, PhoneLine line) throws Exception {
-        // 檢查是否為三方通話
-        if (line.isConference || line.state == LineState.CONFERENCING) {
-            System.out.println("[UNIFIED_PHONE] 檢測到三方通話，使用會議掛斷方式");
-            disconnectConferenceLine(extension, line);
-            return;
-        }
+   private void disconnectLine(String extension, PhoneLine line) throws Exception {
+    // 檢查是否為三方通話
+    if (line.isConference || line.state == LineState.CONFERENCING) {
+        System.out.println("[UNIFIED_PHONE] 檢測到三方通話，使用會議掛斷方式");
+        disconnectConferenceLine(extension, line);
+        return;
+    }
         
         // 一般通話的掛斷邏輯
         if (line.call != null) {
@@ -1636,80 +1646,83 @@ public class UnifiedPhoneService {
         }
     }
     
-    /**
-     * 專用的三方通話掛斷方法
+   /**
+    * 專用的三方通話掛斷方法
      */
     private void disconnectConferenceLine(String extension, PhoneLine line) throws Exception {
-        System.out.println("[UNIFIED_PHONE] 開始處理三方通話掛斷: " + extension);
-        
+         System.out.println("[UNIFIED_PHONE] 開始處理三方通話掛斷: " + extension);
+    
         if (line.call == null) {
-            System.out.println("[UNIFIED_PHONE] 會議通話對象為空");
+        System.out.println("[UNIFIED_PHONE] 會議通話對象為空");
+        return;
+         }
+    
+        try {
+        // 方法1：嘗試找到該分機在會議中的連線並斷開
+        Connection[] connections = line.call.getConnections();
+        System.out.println("[UNIFIED_PHONE] 會議通話連線數: " + connections.length);
+        
+        boolean foundAndDisconnected = false;
+        for (Connection connection : connections) {
+            String address = connection.getAddress().getName();
+            System.out.println("[UNIFIED_PHONE] 檢查會議參與者: " + address + " 狀態: " + connection.getState());
+            
+            if (address.equals(extension)) {
+                if (connection.getState() != Connection.DISCONNECTED) {
+                    System.out.println("[UNIFIED_PHONE] 斷開會議參與者: " + extension);
+                    connection.disconnect();
+                    foundAndDisconnected = true;
+                    
+                    // 給其他參與者一些時間處理
+                    Thread.sleep(500);
+                    break;
+                } else {
+                    System.out.println("[UNIFIED_PHONE] 參與者已斷線: " + extension);
+                    foundAndDisconnected = true;
+                    break;
+                }
+            }
+        }
+        
+        if (foundAndDisconnected) {
+            System.out.println("[UNIFIED_PHONE] 三方通話掛斷成功");
             return;
         }
         
-        try {
-            // 方法1：嘗試找到該分機在會議中的連線並斷開
-            Connection[] connections = line.call.getConnections();
-            System.out.println("[UNIFIED_PHONE] 會議通話連線數: " + connections.length);
-            
-            boolean foundAndDisconnected = false;
-            for (Connection connection : connections) {
-                String address = connection.getAddress().getName();
-                System.out.println("[UNIFIED_PHONE] 檢查會議參與者: " + address + " 狀態: " + connection.getState());
-                
-                if (address.equals(extension)) {
-                    if (connection.getState() != Connection.DISCONNECTED) {
-                        System.out.println("[UNIFIED_PHONE] 斷開會議參與者: " + extension);
-                        connection.disconnect();
-                        foundAndDisconnected = true;
-                        
-                        // 給其他參與者一些時間處理
-                        Thread.sleep(500);
-                        break;
-                    } else {
-                        System.out.println("[UNIFIED_PHONE] 參與者已斷線: " + extension);
-                        foundAndDisconnected = true;
-                        break;
-                    }
+        // 方法2：如果找不到特定連線，嘗試使用ConferenceService的方法
+        System.out.println("[UNIFIED_PHONE] 未找到特定連線，嘗試備選方法");
+        
+        // 檢查是否有 ConferenceService 會話
+        String sessionId = conferenceService.extensionToSessionMap.get(extension);
+        if (sessionId != null) {
+            System.out.println("[UNIFIED_PHONE] 找到會議會話，使用 ConferenceService 結束會議");
+            String result = conferenceService.endConference(extension);
+            System.out.println("[UNIFIED_PHONE] ConferenceService 結果: " + result);
+            return;
+        }
+        
+        // 方法3：最後的備選方案 - 直接斷開所有連線
+        System.out.println("[UNIFIED_PHONE] 使用最後備選方案：斷開所有會議連線");
+        for (Connection connection : connections) {
+            if (connection.getState() != Connection.DISCONNECTED) {
+                try {
+                    connection.disconnect();
+                    System.out.println("[UNIFIED_PHONE] 斷開連線: " + connection.getAddress().getName());
+                } catch (Exception e) {
+                    System.err.println("[UNIFIED_PHONE] 斷開連線失敗: " + connection.getAddress().getName() + " - " + e.getMessage());
                 }
             }
-            
-            if (foundAndDisconnected) {
-                System.out.println("[UNIFIED_PHONE] 三方通話掛斷成功");
-                return;
-            }
-            
-            // 方法2：如果找不到特定連線，嘗試使用ConferenceService的方法
-            System.out.println("[UNIFIED_PHONE] 未找到特定連線，嘗試備選方法");
-            
-            // 檢查是否有 ConferenceService 會話
-            String sessionId = conferenceService.extensionToSessionMap.get(extension);
-            if (sessionId != null) {
-                System.out.println("[UNIFIED_PHONE] 找到會議會話，使用 ConferenceService 結束會議");
-                String result = conferenceService.endConference(extension);
-                System.out.println("[UNIFIED_PHONE] ConferenceService 結果: " + result);
-                return;
-            }
-            
-            // 方法3：最後的備選方案 - 直接斷開所有連線
-            System.out.println("[UNIFIED_PHONE] 使用最後備選方案：斷開所有會議連線");
-            for (Connection connection : connections) {
-                if (connection.getState() != Connection.DISCONNECTED) {
-                    try {
-                        connection.disconnect();
-                        System.out.println("[UNIFIED_PHONE] 斷開連線: " + connection.getAddress().getName());
-                    } catch (Exception e) {
-                        System.err.println("[UNIFIED_PHONE] 斷開連線失敗: " + connection.getAddress().getName() + " - " + e.getMessage());
-                    }
-                }
-            }
-            
+        }
+        
         } catch (Exception e) {
-            System.err.println("[UNIFIED_PHONE] 三方通話掛斷失敗: " + e.getMessage());
-            throw new Exception("三方通話掛斷失敗: " + e.getMessage());
+        System.err.println("[UNIFIED_PHONE] 三方通話掛斷失敗: " + e.getMessage());
+        throw new Exception("三方通話掛斷失敗: " + e.getMessage());
         }
     }
-    
+
+    /**
+     * 根據通話對象和本地分機號，找到遠端分機號
+     */
     private String findRemoteParty(Call call, String localExtension) {
         try {
             Connection[] connections = call.getConnections();
