@@ -73,6 +73,15 @@ public String checkLucentCapabilities(@RequestParam String extension) {
     }
     
     /**
+     * 調試通話狀態
+     * GET /api/transfer/debug?extension=1420
+     */
+    @GetMapping("/debug")
+    public String debugCallStatus(@RequestParam String extension) {
+        return transferService.debugCallStatus(extension);
+    }
+    
+    /**
      * 清理過期轉接會話
      * GET /api/transfer/cleanup
      */

@@ -1,0 +1,123 @@
+JTAPI 盲轉接功能修正開發日誌
+=====================================
+
+問題標題
+--------
+盲轉接功能產生不存在的分機號碼490046，且轉接方向錯誤
+
+問題描述
+--------
+當執行盲轉接API (http://localhost:8080/api/transfer/blind?extension=1420&target=1424) 時：
+1. 系統顯示"轉接成功：490046 的通話已轉接到分機 1424"
+2. 490046 這個分機號碼根本不存在
+3. 原始通話（1411 ↔ 1420）被意外掛斷
+4. 1424 接聽後沒有聲音
+5. 轉接方向錯誤：變成1424打給1411，而非1411打給1424
+
+嘗試方法1
+---------
+檢查程式碼邏輯，尋找490046號碼的來源
+
+結果1
+-----
+發現490046是JTAPI系統在 `extensionConn.provider.getAddress(originalCaller)` 時自動生成的臨時系統號碼。
+程式碼中有邏輯排除以"49"開頭的系統號碼，但轉接邏輯仍錯誤地選擇了系統號碼作為原來電者。
+
+嘗試方法2
+---------
+修正轉接邏輯，優先選擇真正的分機號碼而非系統號碼
+
+結果2
+-----
+成功排除了490046系統號碼問題，系統能正確識別1411為真正的原來電者。
+但轉接方向仍然錯誤：
+- 錯誤實現：`newCall.connect(targetTerminal, targetAddress, originalCaller)` → 1424撥打1411
+- 應該要：1411撥打1424
+
+嘗試方法3
+---------
+研究JTAPI官方文檔，使用標準的single-step transfer方法
+
+結果3
+-----
+找到正確的JTAPI實現方式：
+- 不應該創建新的Call對象
+- 應該直接使用現有Call的 `transfer(String destinationAddress)` 方法
+- 需要正確設定TransferController
+
+資源
+----
+1. Avaya JTAPI文檔：https://support.avaya.com/elmodocs2/AES/3.1.1/jtapi/javax/telephony/callcontrol/CallControlCall.html
+2. JTAPI規範文檔：https://brekeke.com/products/jtapi/JTAPIspecdoc/javax/telephony/Connection.html
+3. Cisco JTAPI範例：https://github.com/CiscoDevNet/jtapi-samples
+
+學到的經驗
+----------
+1. **系統號碼問題**：以"49"開頭的號碼是系統自動生成的臨時號碼，需要在邏輯中過濾
+2. **JTAPI標準實現**：盲轉接應使用 `CallControlCall.transfer(String)` 而非創建新Call
+3. **轉接控制器**：必須正確設定處於TALKING狀態的TerminalConnection作為轉接控制器
+4. **通話狀態驗證**：需要嚴格驗證通話連線狀態，確保真正有活躍通話存在
+5. **調試工具重要性**：增加詳細的調試API能快速定位問題根源
+
+最終解決方案
+------------
+1. **過濾系統號碼**：
+   - 在查找原來電者時，優先選擇真正的分機號碼
+   - 排除以"49"開頭的系統生成號碼
+
+2. **使用JTAPI標準方法**：
+   ```java
+   // 設定轉接控制器
+   controlCall.setTransferController(transferController);
+   
+   // 執行標準的單步轉接
+   Connection newConnection = controlCall.transfer(targetExtension);
+   ```
+
+3. **增強驗證機制**：
+   - 驗證通話連線狀態為CONNECTED
+   - 確保轉接控制器狀態為TALKING
+   - 檢查原來電者不是系統號碼
+
+4. **備用方案**：
+   - 如果JTAPI標準方法失敗，使用傳統的斷開重連方法
+   - 確保原來電者撥打給目標分機（正確方向）
+
+修改檔案
+--------
+1. `src/main/java/com/example/jtapi_develop/TransferService.java`
+   - 修正 `blindTransfer()` 方法的原來電者選擇邏輯
+   - 重寫 `blindTransferUsingReconnectMethod()` 使用JTAPI標準實現
+   - 新增 `debugCallStatus()` 調試方法
+
+2. `src/main/java/com/example/jtapi_develop/TransferController.java`
+   - 新增 `/api/transfer/debug` 調試接口
+
+3. `測試API網址清單.txt`
+   - 新增轉接調試和測試相關API
+   - 增加完整的轉接測試流程說明
+
+參考
+----
+1. JTAPI CallControlCall.transfer() 方法文檔
+2. Avaya ECS JTAPI 3.1.1 API文檔
+3. JTAPI Call Control 介面規範
+4. Cisco JTAPI開發者指南
+5. 盲轉接(Blind Transfer) vs 二段轉接(Attended Transfer) 概念
+
+測試驗證
+--------
+修正前行為：
+- API調用成功但產生不存在的490046號碼
+- 轉接方向錯誤（1424→1411）
+- 原始通話意外掛斷，音頻不正常
+
+修正後預期行為：
+- 正確識別原來電者（1411）
+- 正確的轉接方向（1411→1424）
+- 1420作為轉接者自動退出
+- 1411和1424建立正常通話連線
+
+開發日期：2025年8月14日
+開發者：系統管理員
+版本：v1.0 修正版

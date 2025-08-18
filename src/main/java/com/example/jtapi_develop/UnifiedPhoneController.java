@@ -17,6 +17,9 @@ public class UnifiedPhoneController {
     @Autowired
     private PhoneCallService phoneCallService; // 用於兼容舊版API
     
+    @Autowired
+    private AgentService agentService;
+    
     // ========================================
     // 測試和診斷
     // ========================================
@@ -59,6 +62,15 @@ public class UnifiedPhoneController {
     @GetMapping("/hangup")
     public String hangup(@RequestParam String ext) {
         return phoneService.hangupCurrentLine(ext);
+    }
+    
+    /**
+     * 掛斷指定線路
+     * GET /api/unified-phone/hangup-line?ext=1420&lineId=1420_L2
+     */
+    @GetMapping("/hangup-line")
+    public String hangupLine(@RequestParam String ext, @RequestParam String lineId) {
+        return phoneService.hangupSpecificLine(ext, lineId);
     }
     
     // ========================================
@@ -152,6 +164,15 @@ public class UnifiedPhoneController {
     @GetMapping("/debug-calls")
     public String debugCalls(@RequestParam String ext) {
         return phoneService.debugExistingCalls(ext);
+    }
+    
+    /**
+     * 查看所有話機通話狀態總覽
+     * GET /api/unified-phone/status-all
+     */
+    @GetMapping("/status-all")
+    public String getAllPhoneStatus() {
+        return phoneService.getAllPhoneStatus();
     }
     
     /**
@@ -281,12 +302,21 @@ public class UnifiedPhoneController {
     }
 
     /**
-     * 查看可用線路
+     * 查看可用線路 (本地狀態)
      * GET /api/unified-phone/available-lines?ext=1420
      */
     @GetMapping("/available-lines")
     public String getAvailableLines(@RequestParam String ext) {
         return phoneService.getAvailableLines(ext);
+    }
+    
+    /**
+     * 查看Server端實際可用線路
+     * GET /api/unified-phone/server-lines?ext=1420
+     */
+    @GetMapping("/server-lines")
+    public String getServerAvailableLines(@RequestParam String ext) {
+        return phoneService.getServerAvailableLines(ext);
     }
 
     /**
@@ -305,5 +335,37 @@ public class UnifiedPhoneController {
         }
         
         return phoneService.makeCallOnSpecificLine(ext, number, lineId);
+    }
+    
+    // ========================================
+    // Agent狀態檢查API
+    // ========================================
+    
+    /**
+     * 檢查分機Agent狀態
+     * GET /api/unified-phone/check-agent?ext=1420
+     */
+    @GetMapping("/check-agent")
+    public String checkAgent(@RequestParam String ext) {
+        return phoneService.checkAgentStatus(ext);
+    }
+    
+    /**
+     * 檢查分機是否可接受來電
+     * GET /api/unified-phone/check-availability?ext=1420
+     */
+    @GetMapping("/check-availability")
+    public String checkAvailability(@RequestParam String ext) {
+        return phoneCallService.checkExtensionAvailability(ext);
+    }
+    
+ 
+    /**
+     * 設定Agent狀態
+     * GET /api/unified-phone/set-agent-status?ext=1420&status=BUSY
+     */
+    @GetMapping("/set-agent-status")
+    public String setAgentStatus(@RequestParam String ext, @RequestParam String status) {
+        return agentService.setAgentStatus(ext, status);
     }
 }

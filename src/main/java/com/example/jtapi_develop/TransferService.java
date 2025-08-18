@@ -12,6 +12,9 @@ public class TransferService {
     @Autowired
     private PhoneCallService phoneCallService;
     
+    @Autowired
+    private MethodLogService methodLogService;
+    
     // 用於追蹤轉接狀態的內部類
     private static class TransferSession {
         String transferringExtension;  // 發起轉接的分機
@@ -54,20 +57,39 @@ public class TransferService {
                 return "錯誤：分機 " + extension + " 沒有活躍的通話可以轉接";
             }
             
-            // 3. 找到通話的另一方（原始來電者）
-            String originalCaller = null;
+            // 3. 額外驗證：檢查通話是否真的處於連接狀態
+            boolean hasActiveConnection = false;
             Connection[] connections = activeCall.getConnections();
             for (Connection connection : connections) {
-                String addressName = connection.getAddress().getName();
-                if (!addressName.equals(extension)) {
-                    originalCaller = addressName;
+                if (connection.getState() == Connection.CONNECTED) {
+                    hasActiveConnection = true;
                     break;
                 }
             }
             
-            if (originalCaller == null) {
-                return "錯誤：無法找到通話的另一方";
+            if (!hasActiveConnection) {
+                return "錯誤：沒有找到處於連接狀態的通話連線";
             }
+            
+            // 4. 找到通話的另一方（原始來電者）- 優先選擇真正的分機而非系統號碼
+            String originalCaller = null;
+            String systemNumber = null;
+            
+            for (Connection connection : connections) {
+                String addressName = connection.getAddress().getName();
+                if (!addressName.equals(extension) && connection.getState() == Connection.CONNECTED) {
+                    // 直接使用連接狀態為CONNECTED的對方號碼
+                    originalCaller = addressName;
+                    System.out.println("[BLIND_TRANSFER] 發現通話對方: " + addressName);
+                    break; // 找到對方就立即跳出
+                }
+            }
+            
+            if (originalCaller == null) {
+                return "錯誤：無法找到通話的另一方或對方未處於連接狀態";
+            }
+            
+            System.out.println("[BLIND_TRANSFER] 確認原來電者: " + originalCaller);
             
             System.out.println("[BLIND_TRANSFER] 轉接場景: " + originalCaller + " ↔ " + extension + " → " + originalCaller + " ↔ " + targetExtension);
             
@@ -96,6 +118,7 @@ public class TransferService {
         } catch (Exception e) {
             System.err.println("[BLIND_TRANSFER] 轉接失敗: " + e.getMessage());
             e.printStackTrace();
+            methodLogService.logFailure("一段轉接", "轉接失敗", e.getMessage(), extension, targetExtension);
             return "一段轉接失敗: " + e.getMessage();
         }
     }
@@ -164,6 +187,10 @@ public class TransferService {
             extensionToSessionMap.put(extension, session.sessionId);  // 新增：分機→會話映射
             
             System.out.println("[ATTENDED_TRANSFER] 諮詢通話已建立，會話ID: " + session.sessionId);
+            // 記錄開始二段轉接
+            methodLogService.logSuccess("二段轉接", "開始諮詢通話", 
+                "Hold原通話並撥打目標分機", extension, targetExtension);
+            
             return "二段轉接已開始：正在連接 " + targetExtension + "，會話ID: " + session.sessionId + 
                    "\n提示：請等待目標分機接聽，然後調用完成轉接 API";
             
@@ -171,6 +198,7 @@ public class TransferService {
             System.err.println("[ATTENDED_TRANSFER] 開始轉接失敗: " + e.getMessage());
             e.printStackTrace();
             extensionToSessionMap.remove(extension);  // 清理映射
+            methodLogService.logFailure("二段轉接", "開始轉接失敗", e.getMessage(), extension, targetExtension);
             return "二段轉接開始失敗: " + e.getMessage();
         }
     }
@@ -274,6 +302,10 @@ public String completeAttendedTransfer(String sessionId) {
             extensionToSessionMap.remove(session.transferringExtension);
             debugInfo.append("轉接完成，會話已清理\n");
             
+            // 記錄成功的二段轉接完成方法
+            methodLogService.logSuccess("二段轉接", "AVAYA標準完成方法", 
+                "使用consultCall.transfer(originalCall)", session.transferringExtension, session.targetExtension);
+            
             debugInfo.append("=== 轉接成功完成 ===\n");
             return debugInfo.toString() + "\n結果：二段轉接成功完成！";
             
@@ -285,6 +317,10 @@ public String completeAttendedTransfer(String sessionId) {
                 debugInfo.append("\n--- 嘗試備用方法：originalCall.transfer(consultCall) ---\n");
                 heldControlCall.transfer(consultControlCall);
                 debugInfo.append("備用轉接方法成功\n");
+                
+                // 記錄備用轉接方法成功
+                methodLogService.logSuccess("二段轉接", "備用完成方法", 
+                    "使用originalCall.transfer(consultCall)", session.transferringExtension, session.targetExtension);
                 
                 activeTransfers.remove(sessionId);
                 extensionToSessionMap.remove(session.transferringExtension);
@@ -301,8 +337,7 @@ public String completeAttendedTransfer(String sessionId) {
                     String originalCaller = null;
                     for (Connection connection : heldConnections) {
                         String addressName = connection.getAddress().getName();
-                        if (!addressName.equals(session.transferringExtension) && 
-                            !addressName.startsWith("49")) {
+                        if (!addressName.equals(session.transferringExtension)) {
                             originalCaller = addressName;
                             break;
                         }
@@ -315,6 +350,10 @@ public String completeAttendedTransfer(String sessionId) {
                         // 使用單步轉接方法
                         Connection transferResult = heldControlCall.transfer(session.targetExtension);
                         debugInfo.append("單步轉接執行成功\n");
+                        
+                        // 記錄單步轉接方法成功
+                        methodLogService.logSuccess("二段轉接", "單步轉接方法", 
+                            "使用heldCall.transfer(targetExtension)", session.transferringExtension, session.targetExtension);
                         
                         activeTransfers.remove(sessionId);
                         extensionToSessionMap.remove(session.transferringExtension);
@@ -445,8 +484,7 @@ public String validateTransferReadiness(String extension) {
             Connection[] heldConnections = session.heldCall.getConnections();
             for (Connection connection : heldConnections) {
                 String addressName = connection.getAddress().getName();
-                if (!addressName.equals(session.transferringExtension) && 
-                    !addressName.startsWith("49")) { // 排除系統號碼
+                if (!addressName.equals(session.transferringExtension)) {
                     originalCaller = addressName;
                     debugInfo.append("識別原來電者: ").append(originalCaller).append("\n");
                     break;
@@ -942,6 +980,74 @@ public String validateTransferReadiness(String extension) {
     }
     
     /**
+     * 新增：詳細調試當前通話狀態
+     */
+    public String debugCallStatus(String extension) {
+        try {
+            var conn = phoneCallService.getExtensionConnection(extension);
+            if (conn == null) {
+                return "錯誤：分機 " + extension + " 未登入或連線不可用";
+            }
+            
+            StringBuilder debug = new StringBuilder();
+            debug.append("=== 分機 ").append(extension).append(" 通話狀態詳細調試 ===\n");
+            
+            Call activeCall = findActiveCall(extension, conn);
+            if (activeCall == null) {
+                debug.append("沒有找到活躍通話\n");
+                return debug.toString();
+            }
+            
+            debug.append("找到活躍通話，類型: ").append(activeCall.getClass().getSimpleName()).append("\n");
+            
+            Connection[] connections = activeCall.getConnections();
+            debug.append("通話連線數: ").append(connections.length).append("\n");
+            
+            for (int i = 0; i < connections.length; i++) {
+                Connection connection = connections[i];
+                String addressName = connection.getAddress().getName();
+                int state = connection.getState();
+                
+                debug.append("連線 ").append(i).append(": ").append(addressName)
+                     .append(" (狀態: ").append(getConnectionStateName(state)).append(")\n");
+                
+                
+                // 檢查終端連線
+                TerminalConnection[] termConns = connection.getTerminalConnections();
+                if (termConns != null) {
+                    for (TerminalConnection tc : termConns) {
+                        debug.append("  終端: ").append(tc.getTerminal().getName())
+                             .append(" (狀態: ").append(getTerminalConnectionStateName(tc.getState())).append(")\n");
+                    }
+                }
+            }
+            
+            // 分析問題
+            debug.append("\n=== 問題分析 ===\n");
+            boolean hasSystemNumber = false;
+            boolean hasValidConnection = false;
+            
+            for (Connection connection : connections) {
+                String addressName = connection.getAddress().getName();
+                if (!addressName.equals(extension) && connection.getState() == Connection.CONNECTED) {
+                    hasValidConnection = true;
+                    debug.append("發現有效的對方: ").append(addressName).append("\n");
+                }
+            }
+            
+            if (!hasValidConnection) {
+                debug.append("問題：沒有找到有效的通話對方\n");
+                debug.append("建議：請確認分機之間是否建立了真正的通話連線\n");
+            }
+            
+            return debug.toString();
+            
+        } catch (Exception e) {
+            return "調試失敗: " + e.getMessage();
+        }
+    }
+    
+    /**
      * 測試轉接功能 - 顯示詳細調試信息 - 保持原邏輯不變
      */
     public String testTransferCapabilities(String extension) {
@@ -1081,6 +1187,11 @@ public String validateTransferReadiness(String extension) {
                     CallControlConnection controlConn = (CallControlConnection) connection;
                     System.out.println("[BLIND_TRANSFER] 執行 redirect: " + originalCaller + " → " + targetExtension);
                     controlConn.redirect(targetExtension);
+                    
+                    // 記錄成功的方法
+                    methodLogService.logSuccess("一段轉接", "Redirect方法", 
+                        "使用CallControlConnection.redirect()成功", extension, targetExtension);
+                    
                     return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 redirect 方法）";
                 }
             }
@@ -1089,50 +1200,126 @@ public String validateTransferReadiness(String extension) {
     }
     
     /**
-     * 方法2：使用重新連接方法 (斷開+重新撥打)
+     * 方法2：使用JTAPI標準的single-step transfer方法（正確的盲轉接實現）
      */
     private String blindTransferUsingReconnectMethod(String extension, String targetExtension, String originalCaller, Call activeCall, Object conn) throws Exception {
-        System.out.println("[BLIND_TRANSFER] 嘗試使用 Reconnect 方法");
+        System.out.println("[BLIND_TRANSFER] 嘗試使用 JTAPI Single-Step Transfer 方法");
         
-        var extensionConn = (PhoneCallService.ExtensionConnection) conn;
+        // 驗證原來電者是否為有效的分機號碼
+        if (originalCaller == null || originalCaller.trim().isEmpty()) {
+            throw new Exception("原來電者號碼無效或為空");
+        }
         
-        // 1. 斷開轉接者的連線
-        Connection[] connections = activeCall.getConnections();
+        
+        System.out.println("[BLIND_TRANSFER] 驗證通過 - 原來電者: " + originalCaller + ", 目標: " + targetExtension);
+        
+        // 確保這是一個 CallControlCall
+        if (!(activeCall instanceof CallControlCall)) {
+            throw new Exception("通話不支援 CallControl 功能");
+        }
+        
+        CallControlCall controlCall = (CallControlCall) activeCall;
+        
+        // 設定轉接控制器（轉接者）
+        System.out.println("[BLIND_TRANSFER] 設定轉接控制器: " + extension);
+        
+        Connection[] connections = controlCall.getConnections();
+        TerminalConnection transferController = null;
+        
         for (Connection connection : connections) {
             if (connection.getAddress().getName().equals(extension)) {
-                System.out.println("[BLIND_TRANSFER] 斷開 " + extension + " 的連線");
-                connection.disconnect();
+                TerminalConnection[] termConns = connection.getTerminalConnections();
+                for (TerminalConnection tc : termConns) {
+                    if (tc instanceof CallControlTerminalConnection) {
+                        CallControlTerminalConnection cctc = (CallControlTerminalConnection) tc;
+                        if (cctc.getCallControlState() == CallControlTerminalConnection.TALKING) {
+                            transferController = tc;
+                            System.out.println("[BLIND_TRANSFER] 找到轉接控制器，狀態: TALKING");
+                            break;
+                        }
+                    }
+                }
                 break;
             }
         }
         
-        // 2. 等待一下讓連線完全斷開
-        Thread.sleep(1500);
-        
-        // 3. 建立新的通話：原來電者 → 目標分機
-        System.out.println("[BLIND_TRANSFER] 建立新通話: " + originalCaller + " → " + targetExtension);
+        if (transferController == null) {
+            throw new Exception("找不到處於 TALKING 狀態的轉接控制器");
+        }
         
         try {
-            // 使用原來電者的分機撥打給目標
-            Address callerAddress = extensionConn.provider.getAddress(originalCaller);
-            Terminal callerTerminal = callerAddress.getTerminals()[0];
+            // 設定轉接控制器
+            controlCall.setTransferController(transferController);
+            System.out.println("[BLIND_TRANSFER] 轉接控制器設定完成");
             
-            CallControlCall newCall = (CallControlCall) extensionConn.provider.createCall();
-            newCall.connect(callerTerminal, callerAddress, targetExtension);
+            // 執行JTAPI標準的單步轉接（盲轉接）
+            System.out.println("[BLIND_TRANSFER] 執行單步轉接到: " + targetExtension);
+            Connection newConnection = controlCall.transfer(targetExtension);
             
-            return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 reconnect 方法）";
+            System.out.println("[BLIND_TRANSFER] 單步轉接執行成功");
+            
+            if (newConnection != null) {
+                System.out.println("[BLIND_TRANSFER] 新連線建立: " + newConnection.getAddress().getName());
+            } else {
+                System.out.println("[BLIND_TRANSFER] 轉接到外部號碼，無新連線返回");
+            }
+            
+            // 記錄成功的方法
+            methodLogService.logSuccess("一段轉接", "JTAPI Single-Step Transfer", 
+                "使用CallControlCall.transfer()成功", extension, targetExtension);
+            
+            return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 JTAPI single-step transfer）";
             
         } catch (Exception e) {
-            // 如果無法讓原來電者撥打，嘗試讓目標分機撥打給原來電者
-            System.out.println("[BLIND_TRANSFER] 原來電者撥打失敗，嘗試目標分機撥打");
+            System.out.println("[BLIND_TRANSFER] JTAPI single-step transfer 失敗: " + e.getMessage());
             
-            Address targetAddress = extensionConn.provider.getAddress(targetExtension);
-            Terminal targetTerminal = targetAddress.getTerminals()[0];
-            
-            CallControlCall newCall = (CallControlCall) extensionConn.provider.createCall();
-            newCall.connect(targetTerminal, targetAddress, originalCaller);
-            
-            return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 reconnect 方法）";
+            // 備用方案：使用傳統的斷開重連方法
+            try {
+                System.out.println("[BLIND_TRANSFER] 嘗試備用方案：斷開重連");
+                
+                // 找到轉接者連線並斷開
+                Connection transferrerConnection = null;
+                for (Connection connection : connections) {
+                    if (connection.getAddress().getName().equals(extension)) {
+                        transferrerConnection = connection;
+                        break;
+                    }
+                }
+                
+                if (transferrerConnection != null) {
+                    transferrerConnection.disconnect();
+                    System.out.println("[BLIND_TRANSFER] 轉接者連線已斷開");
+                    Thread.sleep(1500);
+                }
+                
+                // 讓原來電者撥打給目標
+                var extensionConn = (PhoneCallService.ExtensionConnection) conn;
+                Address callerAddress = extensionConn.provider.getAddress(originalCaller);
+                if (callerAddress == null) {
+                    throw new Exception("原來電者 " + originalCaller + " 地址獲取失敗");
+                }
+                
+                Terminal[] callerTerminals = callerAddress.getTerminals();
+                if (callerTerminals == null || callerTerminals.length == 0) {
+                    throw new Exception("原來電者 " + originalCaller + " 沒有可用的終端");
+                }
+                
+                Terminal callerTerminal = callerTerminals[0];
+                CallControlCall newCall = (CallControlCall) extensionConn.provider.createCall();
+                newCall.connect(callerTerminal, callerAddress, targetExtension);
+                
+                System.out.println("[BLIND_TRANSFER] 備用方案成功: " + originalCaller + " → " + targetExtension);
+                
+                // 記錄成功的方法
+                methodLogService.logSuccess("一段轉接", "斷開重連備用方法", 
+                    "先斷開轉接者連線，再讓原來電者撥打目標", extension, targetExtension);
+                
+                return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用備用方法）";
+                
+            } catch (Exception e2) {
+                System.out.println("[BLIND_TRANSFER] 備用方案也失敗: " + e2.getMessage());
+                throw new Exception("JTAPI transfer 失敗: " + e.getMessage() + ", 備用方法失敗: " + e2.getMessage());
+            }
         }
     }
     
@@ -1189,6 +1376,10 @@ public String validateTransferReadiness(String extension) {
                     break;
                 }
             }
+            
+            // 記錄成功的方法
+            methodLogService.logSuccess("一段轉接", "會議轉接方法", 
+                "Hold原通話→撥打目標→建立會議→退出會議", extension, targetExtension);
             
             return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 conference 方法）";
         } else {

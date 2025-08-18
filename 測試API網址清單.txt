@@ -1,0 +1,244 @@
+Avaya 1420 IP Phone 測試 API 網址清單
+===========================================
+
+基本登入
+--------
+http://localhost:8080/api/unified-phone/login?extension=ctiuser&password=Avaya123!
+
+基本通話功能
+------------
+http://localhost:8080/api/unified-phone/answer?ext=1420
+http://localhost:8080/api/unified-phone/dial?ext=1420&number=1424
+http://localhost:8080/api/unified-phone/hangup?ext=1420
+http://localhost:8080/api/unified-phone/display?ext=1420
+
+Hold 功能
+---------
+http://localhost:8080/api/unified-phone/hold-active?ext=1420
+http://localhost:8080/api/unified-phone/unhold?ext=1420
+http://localhost:8080/api/unified-phone/unhold-line?ext=1420&line=1
+
+轉接功能
+--------
+一段轉接（盲轉接）：
+http://localhost:8080/api/transfer/blind?extension=1420&target=1424
+
+二段轉接：
+http://localhost:8080/api/transfer/attended/start?extension=1420&target=1424
+http://localhost:8080/api/transfer/attended/complete-by-extension?extension=1420
+http://localhost:8080/api/transfer/attended/cancel-by-extension?extension=1420
+
+Lucent V15 系統專用轉接能力檢查：
+http://localhost:8080/api/transfer/lucent-check?extension=1420
+
+轉接狀態查詢：
+http://localhost:8080/api/transfer/status
+http://localhost:8080/api/transfer/status-by-extension?extension=1420
+
+轉接能力測試：
+http://localhost:8080/api/transfer/test?extension=1420
+
+轉接通話狀態調試：
+http://localhost:8080/api/transfer/debug?extension=1420
+
+清理過期轉接會話：
+http://localhost:8080/api/transfer/cleanup
+
+清理無效會議會話：
+http://localhost:8080/api/conference/cleanup-invalid
+
+會議功能
+--------
+發起三方會議：
+http://localhost:8080/api/conference/start?host=1420&invited=1425
+
+建立會議：
+http://localhost:8080/api/conference/establish?host=1420
+
+取消會議：
+http://localhost:8080/api/conference/cancel?host=1420
+
+會議狀態查詢：
+http://localhost:8080/api/conference/status-by-extension?extension=1420
+
+Agent 功能
+----------
+Agent 登入：
+http://localhost:8080/api/agent/login?extension=1420&agentId=12345
+
+Agent 登出：
+http://localhost:8080/api/agent/logout?extension=1420
+
+Agent 狀態查詢：
+http://localhost:8080/api/agent/status?extension=1420
+
+Agent 手動接聽模式 (Manual-in #96)：
+http://localhost:8080/api/agent/manual-in?extension=1420
+
+Agent 自動接聽模式 (Auto-in #92)：
+http://localhost:8080/api/agent/auto-in?extension=1420
+
+Agent 設為待機：
+http://localhost:8080/api/agent/available?extension=1420
+
+Agent 設為忙碌：
+http://localhost:8080/api/agent/busy?extension=1420
+
+Agent 設為休息：
+http://localhost:8080/api/agent/break?extension=1420
+
+多線控制
+--------
+接聽來電：
+http://localhost:8080/api/multiline/answer?extension=1420
+
+撥打新電話：
+http://localhost:8080/api/multiline/make-call?extension=1420&target=1424
+
+Hold 指定通話：
+http://localhost:8080/api/multiline/hold?extension=1420&lineId=1
+
+恢復 Hold 的通話：
+http://localhost:8080/api/multiline/unhold?extension=1420&lineId=1
+
+切換到指定線路：
+http://localhost:8080/api/multiline/switch?extension=1420&lineId=2
+
+掛斷指定通話：
+http://localhost:8080/api/multiline/hangup?extension=1420&lineId=1
+
+掛斷所有通話：
+http://localhost:8080/api/multiline/hangup-all?extension=1420
+
+Hold 當前並撥打新電話：
+http://localhost:8080/api/multiline/hold-and-call?extension=1420&target=1424
+
+在兩條線路間切換：
+http://localhost:8080/api/multiline/toggle?extension=1420
+
+線路詳細資訊：
+http://localhost:8080/api/multiline/line-details?extension=1420&lineId=1
+
+清理斷開的線路：
+http://localhost:8080/api/multiline/cleanup?extension=1420
+
+測試多線能力：
+http://localhost:8080/api/multiline/test?extension=1420
+
+自動接聽模式設定：
+http://localhost:8080/api/multiline/auto-answer?extension=1420&enabled=true
+
+線路操作 (統一話機)
+------------------
+選擇線路撥號：
+http://localhost:8080/api/unified-phone/select-line-and-dial?ext=1420&number=1424&preferredLine=L1
+
+線路切換：
+http://localhost:8080/api/unified-phone/line?ext=1420&line=1420_L1
+
+查看可用線路 (本地狀態)：
+http://localhost:8080/api/unified-phone/available-lines?ext=1420
+
+查看Server端實際線路狀態：
+http://localhost:8080/api/unified-phone/server-lines?ext=1420
+
+Flash 切換：
+http://localhost:8080/api/unified-phone/flash?ext=1420
+
+監聽功能
+--------
+查詢可監聽的通話：
+http://localhost:8080/api/monitor/available-calls?supervisorExtension=1001
+
+開始監聽：
+http://localhost:8080/api/monitor/start?supervisorExtension=1001&targetExtension=1420
+
+停止監聽：
+http://localhost:8080/api/monitor/stop?supervisorExtension=1001
+
+闖入通話：
+http://localhost:8080/api/monitor/barge-in?supervisorExtension=1001&targetExtension=1420
+
+教練模式：
+http://localhost:8080/api/monitor/coach?supervisorExtension=1001&targetExtension=1420
+
+監聽狀態查詢：
+http://localhost:8080/api/monitor/status?supervisorExtension=1001
+
+所有監聽會話：
+http://localhost:8080/api/monitor/all-sessions
+
+查看通話狀態
+------------
+系統狀態測試：
+http://localhost:8080/api/unified-phone/test?ext=1411
+http://localhost:8080/api/unified-phone/test?ext=1420
+http://localhost:8080/api/unified-phone/test?ext=1424
+
+查看所有分機狀態：
+http://localhost:8080/api/phone/status
+
+查看特定分機的話機顯示：
+http://localhost:8080/api/unified-phone/display?ext=1420
+
+查看特定分機的簡化狀態：
+http://localhost:8080/api/unified-phone/status?ext=1420
+
+查看多線狀態：
+http://localhost:8080/api/multiline/status?extension=1420
+
+查看所有分機的多線狀態：
+http://localhost:8080/api/multiline/status-all
+
+查看所有話機通話狀態總覽：
+http://localhost:8080/api/unified-phone/status-all
+
+調試通話連線資訊：
+http://localhost:8080/api/unified-phone/debug-calls?ext=1420
+
+網頁介面
+--------
+主頁面（舊版話機界面）：
+http://localhost:8080/
+
+一橫條話機界面（新版）：
+http://localhost:8080/avaya-phone.html
+
+登入頁面：
+http://localhost:8080/login.html
+
+測試說明
+--------
+1. 先使用登入 API 登入系統
+2. 使用 display API 查看當前狀態
+3. 測試各項功能前建議先查看對應的狀態 API
+4. 所有 API 都是 GET 請求，可直接在瀏覽器中測試
+5. 替換 1420 為您的實際分機號，1424/1425 為測試目標號碼
+6. 監聽功能中 1001 為主管分機號，1420 為被監聽的分機號
+
+轉接測試流程
+----------
+1. 確認各分機系統狀態：
+   curl -X GET "http://localhost:8080/api/unified-phone/test?ext=1411"
+   curl -X GET "http://localhost:8080/api/unified-phone/test?ext=1420"
+   curl -X GET "http://localhost:8080/api/unified-phone/test?ext=1424"
+
+2. 建立通話：1411 撥打 1420，1420 接聽
+
+3. 調試當前通話狀態：
+   curl -X GET "http://localhost:8080/api/transfer/debug?extension=1420"
+
+4. 執行盲轉接（將1411-1420通話轉接到1411-1424）：
+   curl -X GET "http://localhost:8080/api/transfer/blind?extension=1420&target=1424"
+
+5. 驗證結果：
+   - 1420 應該掛斷（退出通話）
+   - 1411 撥打給 1424
+   - 1424 接聽後能與 1411 正常通話
+
+系統問題解決記錄
+--------------
+- 修正了490046系統號碼問題（系統自動生成的臨時號碼）
+- 修正了轉接邏輯優先選擇真實分機而非系統號碼
+- 修正了轉接方向錯誤（現在是原來電者撥打目標分機）
+- 增加了詳細的通話狀態調試功能
