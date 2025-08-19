@@ -638,6 +638,7 @@
         let agentLoggedIn = false;
         let currentAgentNumber = '';
         let currentMonitorTarget = '';
+        let eventSource = null; 
         const currentExtension = '1420';
 
         async function login() {
@@ -655,6 +656,10 @@
                         document.getElementById('phoneInterface').style.display = 'block';
                         isLoggedIn = true;
                         alert('登入成功！' + result);
+                        // ================== 新增/修改處 ==================
+            // 登入成功後，開始監聽來自伺服器的即時事件
+            connectToSseEvents();
+            // ===============================================
                     } else {
                         alert('登入失敗：' + result);
                     }
@@ -1328,17 +1333,23 @@
         }
 
         function startAutoRefresh() {
-            // 清除任何現有的定時器
-            stopAutoRefresh();
-            
-            console.log('🚀 啟動自動更新功能 (avaya-phone.html)...');
-            
-            // 設置新的自動重整定時器 (3秒，更頻繁以偵測來電)
-            multilineRefreshInterval = setInterval(async () => {
-                console.log('🔄 自動重整多線狀態...');
-                await refreshLines();
-                checkIncomingCallsStatus(); // 檢查來電狀態
-            }, 3000);
+        // 清除任何現有的定時器
+        stopAutoRefresh();
+        
+        console.log('🚀 自動更新功能已由 SSE 取代，不再使用輪詢');
+        
+        // 【重要】註解掉或刪除 setInterval，因為我們不再需要它了
+        /* multilineRefreshInterval = setInterval(async () => {
+            console.log('🔄 自動重整多線狀態...');
+            await refreshLines();
+            checkIncomingCallsStatus(); // 檢查來電狀態
+        }, 3000); 
+        */
+
+        // 第一次載入時手動刷新一次
+        setTimeout(() => {
+            refreshLines();
+        }, 500);
             
             // 先執行一次來電檢測
             setTimeout(() => {
@@ -1782,7 +1793,7 @@
                 
                     // 檢查是否是會議通話
         if (lineId.includes("_conf_")) {
-            const response = await fetch(`/api/conference/end?host=${currentExtension}`);
+            const response = await fetch(`/api/conference/leave?host=${currentExtension}`); 
             const result = await response.text();
             alert(result);
             setTimeout(() => refreshLines(), 1000);
@@ -1853,6 +1864,58 @@
                     `分機: 1420 | Agent: ${currentAgentNumber} | 狀態: ${workMode}`;
             }
         }
+
+
+        function connectToSseEvents() {
+        // 如果已有連接，先關閉
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        // 連接到後端的 SSE 端點，並傳入當前分機號
+        console.log(`[SSE] 正在連接到 /api/unified-phone/events?ext=${currentExtension}`);
+        eventSource = new EventSource(`/api/unified-phone/events?ext=${currentExtension}`);
+
+        // 監聽後端推送的 "phone_event" 事件
+        eventSource.addEventListener('phone_event', (event) => {
+            console.log('[SSE] 收到 phone_event:', event.data);
+            const eventData = JSON.parse(event.data);
+            
+            console.log(`[SSE] 事件類型: ${eventData.eventType}, 訊息: ${eventData.message}`);
+
+            // 收到任何事件，都觸發一次全面的狀態刷新
+            // 這是最簡單的實現，因為 refreshLines() 函式已經很完善
+            refreshLines();
+            
+            // 特別處理來電響鈴事件，讓接聽按鈕閃爍
+            if (eventData.eventType === 'RINGING') {
+                const answerBtn = document.querySelector('.control-btn.answer');
+                if (answerBtn) {
+                    answerBtn.classList.add('incoming-call');
+                }
+            } else if (eventData.eventType === 'DROPPED' || eventData.eventType === 'ACTIVE') {
+                // 如果是掛斷或接聽事件，停止閃爍
+                const answerBtn = document.querySelector('.control-btn.answer');
+                if (answerBtn) {
+                    answerBtn.classList.remove('incoming-call');
+                }
+            }
+        });
+
+        // 監聽連接打開
+        eventSource.onopen = () => {
+            console.log('[SSE] ✅ 連接已建立，等待伺服器事件...');
+        };
+
+        // 監聽錯誤
+        eventSource.onerror = (err) => {
+            console.error('[SSE] ❌ EventSource 發生錯誤:', err);
+            eventSource.close(); // 發生錯誤時關閉連接
+            // 可以在這裡加入重連邏輯
+            setTimeout(connectToSseEvents, 5000); // 5秒後嘗試重連
+        };
+    }
+
         
         async function updateAgentStatusDisplay() {
             if (!agentLoggedIn) return;

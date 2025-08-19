@@ -3,6 +3,8 @@ package com.example.jtapi_develop;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import java.util.concurrent.CompletableFuture;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
 
 /**
  * 統一話機控制器 - 模擬IP話機的按鍵操作
@@ -20,6 +22,8 @@ public class UnifiedPhoneController {
     @Autowired
     private AgentService agentService;
     
+    @Autowired
+    private SseService sseService;
     // ========================================
     // 測試和診斷
     // ========================================
@@ -32,7 +36,14 @@ public class UnifiedPhoneController {
     public String test(@RequestParam String ext) {
         return "統一話機服務正常運行，分機：" + ext + "，時間：" + new java.util.Date();
     }
-    
+   /* SSE 事件訂閱端點
+     * 前端將通過此 API 建立持久連接以接收伺服器事件
+     * GET /api/unified-phone/events?ext=1420
+     */
+    @GetMapping("/events")
+    public SseEmitter subscribeToEvents(@RequestParam String ext) {
+        return sseService.addEmitter(ext);
+    }
     // ========================================
     // 基本通話控制（綠色/紅色按鍵）
     // ========================================

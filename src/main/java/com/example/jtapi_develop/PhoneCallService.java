@@ -18,6 +18,8 @@ public class PhoneCallService {
     @Autowired
     private MethodLogService methodLogService;
     
+    @Autowired
+    private SseService sseService; 
     // 存儲每個分機/用戶的連線信息
     private final ConcurrentHashMap<String, ExtensionConnection> extensions = new ConcurrentHashMap<>();
     

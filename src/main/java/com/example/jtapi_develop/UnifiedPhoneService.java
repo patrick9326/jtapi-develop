@@ -263,7 +263,7 @@ public class UnifiedPhoneService {
             ConferenceService.ConferenceSession session = conferenceService.activeSessions.get(sessionId);
             if (session != null && session.isActive) {
                 // 使用會議服務掛斷
-                String result = conferenceService.endConference(extension);
+                String result = conferenceService.leaveConference(extension);
                 return "會議掛斷結果: " + result;
             }
         }
