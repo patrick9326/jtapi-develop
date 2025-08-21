@@ -8,12 +8,18 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Date;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map; // *** SSE-MODIFIED ***: 引入 Map
+import java.util.HashMap; // *** SSE-MODIFIED ***: 引入 HashMap
 
 @Service
 public class MonitorService {
     
     @Autowired
     private PhoneCallService phoneCallService;
+    
+    // *** SSE-MODIFIED ***: 注入 SseService
+    @Autowired
+    private SseService sseService;
     
     /**
      * 監聽會話類
@@ -165,11 +171,25 @@ public class MonitorService {
             // 執行監聽指令
             boolean success = executeSilentMonitor(supervisorExtension, targetExtension, session);
             
+            // *** SSE-MODIFIED ***: 開始監聽後發送事件
+            Map<String, String> eventData = new HashMap<>();
+            eventData.put("action", "start");
+            eventData.put("type", "SILENT");
+            eventData.put("supervisor", supervisorExtension);
+            eventData.put("target", targetExtension);
+            
+            // 廣播給所有相關分機
+            broadcastMonitorEvent(eventData);
+
             System.out.println("[MONITOR] executeSilentMonitor 回傳結果: " + success);
             
             if (success) {
                 session.isActive = true;
                 monitorSessions.put(supervisorExtension, session);
+                
+                // *** SSE-MODIFIED ***: 監聽成功後更新事件狀態
+                eventData.put("status", "success");
+                broadcastMonitorEvent(eventData);
                 
                 System.out.println("[MONITOR] 監聽會話已建立，準備回傳成功訊息");
                 
@@ -201,10 +221,19 @@ public class MonitorService {
             // 直接嘗試斷線，不檢查本地狀態
             boolean success = executeStopMonitoring(supervisorExtension);
             
+            // *** SSE-MODIFIED ***: 停止監聽後發送事件
+            Map<String, String> eventData = new HashMap<>();
+            eventData.put("action", "stop");
+            eventData.put("supervisor", supervisorExtension);
+            eventData.put("status", success ? "success" : "failed");
+            broadcastMonitorEvent(eventData);
+            
             // 清理本地記錄（如果有的話）
             monitorSessions.remove(supervisorExtension);
             
             if (success) {
+
+
                 return "監聽停止指令已執行\n" +
                        "監督者: " + supervisorExtension + "\n" +
                        "停止時間: " + new Date() + "\n" +
@@ -249,11 +278,22 @@ public class MonitorService {
             // 執行闖入指令
             boolean success = executeBargeIn(supervisorExtension, targetExtension, session);
             
+            // *** SSE-MODIFIED ***: 闖入嘗試後發送事件
+            Map<String, String> eventData = new HashMap<>();
+            eventData.put("action", "start");
+            eventData.put("type", "BARGE_IN");
+            eventData.put("supervisor", supervisorExtension);
+            eventData.put("target", targetExtension);
+            eventData.put("status", success ? "success" : "failed");
+            broadcastMonitorEvent(eventData);
+            
             if (success) {
                 session.isActive = true;
                 // 簡化：僅用於追蹤，不依賴此狀態做判斷
                 monitorSessions.put(supervisorExtension, session);
                 
+                // SSE事件已在上面發送
+
                 return "通話闖入成功\n" +
                        "監督者: " + supervisorExtension + "\n" +
                        "目標分機: " + targetExtension + "\n" +
@@ -718,6 +758,14 @@ public class MonitorService {
                 session.isActive = false;
                 monitorSessions.remove(supervisorExtension);
                 
+                // *** SSE-MODIFIED ***: 掛斷監聽後發送事件
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "hangup");
+                eventData.put("supervisor", supervisorExtension);
+                eventData.put("type", session.monitorType);
+                eventData.put("status", "success");
+                broadcastMonitorEvent(eventData);
+                
                 return "監聽/闖入通話已掛斷\n" +
                        "監督者: " + supervisorExtension + "\n" +
                        "監聽類型: " + session.getTypeDisplay() + "\n" +
@@ -727,6 +775,14 @@ public class MonitorService {
                 boolean hangupResult = executeStopMonitoring(supervisorExtension);
                 
                 if (hangupResult) {
+                    // *** SSE-MODIFIED ***: 強制掛斷後發送事件
+                    Map<String, String> eventData = new HashMap<>();
+                    eventData.put("action", "hangup");
+                    eventData.put("supervisor", supervisorExtension);
+                    eventData.put("type", "UNKNOWN");
+                    eventData.put("status", "success");
+                    broadcastMonitorEvent(eventData);
+                    
                     return "監聽通話已掛斷（強制清理）\n" +
                            "監督者: " + supervisorExtension + "\n" +
                            "結束時間: " + new Date();
@@ -829,6 +885,23 @@ public class MonitorService {
         } catch (Exception e) {
             System.err.println("[MONITOR] 停止監聽會話失敗: " + e.getMessage());
             return false;
+        }
+    }
+    
+    /**
+     * 廣播監聽事件給所有相關分機
+     */
+    private void broadcastMonitorEvent(Map<String, String> eventData) {
+        // 監聽列表中的目標分機
+        String[] targetExtensions = {"1411", "1424", "1422", "1420"};
+        
+        for (String ext : targetExtensions) {
+            try {
+                sseService.sendEvent(ext, "monitor_event", eventData);
+                System.out.println("[MONITOR] 已向分機 " + ext + " 廣播監聽事件");
+            } catch (Exception e) {
+                System.err.println("[MONITOR] 向分機 " + ext + " 廣播事件失敗: " + e.getMessage());
+            }
         }
     }
 }

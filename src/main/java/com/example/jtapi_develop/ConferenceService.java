@@ -8,12 +8,18 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map; // *** SSE-MODIFIED ***
+import java.util.HashMap; // *** SSE-MODIFIED ***
 
 @Service
 public class ConferenceService {
     
     @Autowired
     private PhoneCallService phoneCallService;
+
+     // *** SSE-MODIFIED ***: 注入 SseService
+    @Autowired
+    private SseService sseService;
     
     // 會議會話管理 - 改為 public 讓 Controller 可以存取
     public static class ConferenceSession {
@@ -296,6 +302,12 @@ public class ConferenceService {
                 }
                 
                 debugInfo.append("=== 會議建立完成 ===\n");
+
+                 // *** SSE-MODIFIED ***: 會議建立後，發送 phone_event 通知前端刷新線路
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "conference_established");
+                sseService.sendEvent(hostExtension, "phone_event", eventData);
+
                 return debugInfo.toString() + "\n🎉 三方會議建立成功！所有參與者已加入會議。";
                 
             } catch (Exception conferenceError) {

@@ -8,6 +8,13 @@ import javax.telephony.callcontrol.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.Map;
+import javax.telephony.events.TermConnRingingEv;
+import javax.telephony.events.TermConnActiveEv;
+import javax.telephony.events.TermConnDroppedEv;
+import javax.telephony.events.TermConnEv;
+import javax.telephony.events.CallEv;
+import javax.telephony.callcontrol.events.CallCtlTermConnHeldEv;
+import java.util.HashMap;
 
 @Service
 public class PhoneCallService {
@@ -15,8 +22,9 @@ public class PhoneCallService {
     @Autowired
     private ApplicationContext applicationContext;
     
+    // *** UUI-MODIFIED ***: 注入新的 UuiService
     @Autowired
-    private MethodLogService methodLogService;
+    private UuiService uuiService;
     
     @Autowired
     private SseService sseService; 
@@ -127,9 +135,9 @@ public class PhoneCallService {
                 }
                 
                 System.out.println("[" + extension + "] Provider 已進入服務狀態");
-                
+                // 在成功取得 Terminal 後，加入監聽器
                 // 對於一般分機，嘗試取得地址和終端
-                if ("extension".equals(conn.userType)) {
+                 if ("extension".equals(conn.userType)) {
                     try {
                         conn.address = conn.provider.getAddress(extension);
                         System.out.println("[" + extension + "] 地址創建成功");
@@ -142,9 +150,15 @@ public class PhoneCallService {
                             conn.terminal = conn.provider.getTerminal(extension);
                             System.out.println("[" + extension + "] 終端創建成功 (直接方式)");
                         }
+                        
+                        // ================== 新增監聽器 ==================
+                        if (conn.terminal != null && conn.address != null) { // *** 已修改 ***
+                            addTerminalListener(extension, conn.terminal, conn.address); // *** 已修改 ***
+                        }
+                        // ===============================================
+
                     } catch (Exception e) {
                         System.out.println("[" + extension + "] 無法取得地址或終端: " + e.getMessage());
-                        // 對於分機，這可能是問題，但我們仍然繼續
                     }
                 }
                 
@@ -155,6 +169,12 @@ public class PhoneCallService {
                 if ("cti".equals(conn.userType)) {
                     resultMessage = "CTI 用戶 " + extension + " 登入成功，具備分機控制權限";
                     System.out.println("[" + extension + "] CTI 用戶登入成功");
+                    
+                    // ================== 重要：為主要分機建立JTAPI事件監聽器 ==================
+                    // 只要是 CTI 用戶登入，就設置事件監聽器（不限定特定用戶名）
+                    setupMainExtensionListeners(conn);
+                    System.out.println("[" + extension + "] 已為 CTI 用戶設置事件監聽器");
+                    // ================================================================
                 } else {
                     resultMessage = "分機 " + extension + " 登入成功";
                     System.out.println("[" + extension + "] 分機登入成功");
@@ -169,6 +189,89 @@ public class PhoneCallService {
             }
         });
     }
+
+    
+
+    /**
+     * 為主要分機(1420)建立JTAPI事件監聽器
+     */
+    private void setupMainExtensionListeners(ExtensionConnection ctiConn) {
+        try {
+            System.out.println("[SETUP_LISTENERS] 開始為主要分機建立監聽器...");
+            
+            // 為分機1420建立監聽器
+            String[] mainExtensions = {"1420"};
+            
+            for (String ext : mainExtensions) {
+                try {
+                    Address address = ctiConn.provider.getAddress(ext);
+                    Terminal[] terminals = address.getTerminals();
+                    
+                    if (terminals != null && terminals.length > 0) {
+                        Terminal terminal = terminals[0];
+                        addTerminalListener(ext, terminal, address); // *** 已修改 *** 傳入 address 物件
+                        System.out.println("[SETUP_LISTENERS] ✅ 已為分機 " + ext + " 建立監聽器");
+                    }else {
+                        System.out.println("[SETUP_LISTENERS] ❌ 分機 " + ext + " 沒有可用的Terminal");
+                    }
+                } catch (Exception e) {
+                    System.err.println("[SETUP_LISTENERS] ❌ 為分機 " + ext + " 建立監聽器失敗: " + e.getMessage());
+                }
+            }
+            
+            System.out.println("[SETUP_LISTENERS] 主要分機監聽器設置完成");
+        } catch (Exception e) {
+            System.err.println("[SETUP_LISTENERS] 設置主要分機監聽器時發生錯誤: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 強制為指定分機設置監聽器
+     */
+    public String forceSetupListener(String extension) {
+        try {
+            ExtensionConnection ctiConn = getExtensionConnection("ctiuser");
+            if (ctiConn == null || !ctiConn.isReady) {
+                return "❌ CTI用戶未登入，請先登入CTI用戶";
+            }
+            
+            System.out.println("[FORCE_SETUP] 開始為分機 " + extension + " 強制設置監聽器...");
+            
+            // 獲取分機地址和終端
+            Address address = ctiConn.provider.getAddress(extension);
+            Terminal[] terminals = address.getTerminals();
+            
+            if (terminals == null || terminals.length == 0) {
+                return "❌ 分機 " + extension + " 沒有可用的Terminal";
+            }
+            
+            Terminal terminal = terminals[0];
+            
+            // 設置監聽器
+            addTerminalListener(extension, terminal, address);
+            
+            return "✅ 已為分機 " + extension + " 設置JTAPI事件監聽器\n現在來電/接聽/掛斷事件會自動推送到SSE";
+            
+        } catch (Exception e) {
+            System.err.println("[FORCE_SETUP] 設置監聽器失敗: " + e.getMessage());
+            return "❌ 設置監聽器失敗: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 新增方法：發送更新事件到前端
+     */
+    private void sendUpdateEvent(String extension, String eventType, String message) {
+        Map<String, String> eventData = new HashMap<>();
+        eventData.put("extension", extension);
+        eventData.put("eventType", eventType);
+        eventData.put("message", message);
+        eventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+
+        // 使用 SseService 推送事件，事件名稱統一為 "phone_event"
+        sseService.sendEvent(extension, "phone_event", eventData);
+    }
+
     
     /**
      * 撥打電話 (支援 CTI 控制)
@@ -188,7 +291,6 @@ public class PhoneCallService {
                 System.out.println("[CALL] 使用直接登入模式");
                 Call call = directConn.provider.createCall();
                 call.connect(directConn.terminal, directConn.address, calleeExt);
-                methodLogService.logSuccess("撥號", "直接登入模式", "使用分機直接登入撥號", callerExt, calleeExt);
                 return "分機 " + callerExt + " 正在撥打給 " + calleeExt + " (直接模式)";
             }
             
@@ -255,19 +357,27 @@ public class PhoneCallService {
                 return "錯誤：分機 " + callerExt + " 沒有可用的終端設備";
             }
             
+            // ================== 確保監聽器已設置 ==================
+            try {
+                // *** 已修正 *** 把 callerAddress 作為第3個參數傳入
+                addTerminalListener(callerExt, callerTerminal, callerAddress); 
+                System.out.println("[CALL] 已確保分機 " + callerExt + " 監聽器設置");
+            } catch (Exception e) {
+                System.out.println("[CALL] 設置監聽器失敗: " + e.getMessage());
+            }
+            // ===================================================
+            
             // 建立通話
             System.out.println("[CALL] 開始建立通話連線...");
             Call call = ctiConn.provider.createCall();
             call.connect(callerTerminal, callerAddress, calleeExt);
             
             System.out.println("[CALL] CTI 控制成功：" + callerExt + " → " + calleeExt);
-            methodLogService.logSuccess("撥號", "CTI控制模式", "使用CTI控制分機撥號", callerExt, calleeExt);
             return "CTI 控制：分機 " + callerExt + " 正在撥打給 " + calleeExt;
             
         } catch (Exception e) {
             System.err.println("[CALL] 撥打失敗: " + e.getMessage());
             e.printStackTrace();
-            methodLogService.logFailure("撥號", "撥號失敗", e.getMessage(), callerExt, calleeExt);
             return "撥打失敗: " + e.getMessage();
         }
     }
@@ -284,9 +394,7 @@ public class PhoneCallService {
             if (directConn != null && directConn.isReady && directConn.terminal != null) {
                 String result = answerCallDirect(extension, directConn);
                 if (result.contains("已接聽")) {
-                    methodLogService.logSuccess("接聽", "直接模式", "使用分機直接登入接聽", extension, null);
                 } else {
-                    methodLogService.logFailure("接聽", "直接模式", result, extension, null);
                 }
                 return result;
             }
@@ -294,22 +402,18 @@ public class PhoneCallService {
             // 使用 CTI 控制模式
             ExtensionConnection ctiConn = findCTIConnection();
             if (ctiConn == null) {
-                methodLogService.logFailure("接聽", "CTI控制模式", "沒有可用的CTI連線", extension, null);
                 return "錯誤：沒有可用的 CTI 連線";
             }
             
             String result = answerCallByCTI(extension, ctiConn);
             if (result.contains("已接聽")) {
-                methodLogService.logSuccess("接聽", "CTI控制模式", "使用CTI控制接聽", extension, null);
             } else {
-                methodLogService.logFailure("接聽", "CTI控制模式", result, extension, null);
             }
             return result;
             
         } catch (Exception e) {
             System.err.println("[ANSWER] 接聽失敗: " + e.getMessage());
             e.printStackTrace();
-            methodLogService.logFailure("接聽", "接聽失敗", e.getMessage(), extension, null);
             return "接聽失敗: " + e.getMessage();
         }
     }
@@ -326,9 +430,7 @@ public class PhoneCallService {
             if (directConn != null && directConn.isReady && directConn.terminal != null) {
                 String result = hangupCallDirect(extension, directConn);
                 if (result.contains("已掛斷")) {
-                    methodLogService.logSuccess("掛斷", "直接模式", "使用分機直接登入掛斷", extension, null);
                 } else {
-                    methodLogService.logFailure("掛斷", "直接模式", result, extension, null);
                 }
                 return result;
             }
@@ -336,22 +438,18 @@ public class PhoneCallService {
             // 使用 CTI 控制模式
             ExtensionConnection ctiConn = findCTIConnection();
             if (ctiConn == null) {
-                methodLogService.logFailure("掛斷", "CTI控制模式", "沒有可用的CTI連線", extension, null);
                 return "錯誤：沒有可用的 CTI 連線";
             }
             
             String result = hangupCallByCTI(extension, ctiConn);
             if (result.contains("已掛斷")) {
-                methodLogService.logSuccess("掛斷", "CTI控制模式", "使用CTI控制掛斷", extension, null);
             } else {
-                methodLogService.logFailure("掛斷", "CTI控制模式", result, extension, null);
             }
             return result;
             
         } catch (Exception e) {
             System.err.println("[HANGUP] 掛斷失敗: " + e.getMessage());
             e.printStackTrace();
-            methodLogService.logFailure("掛斷", "掛斷失敗", e.getMessage(), extension, null);
             return "掛斷失敗: " + e.getMessage();
         }
     }
@@ -581,6 +679,118 @@ public class PhoneCallService {
         return false;
     }
     
+    /**
+     * 新增方法：為 Terminal 和 Address 新增監聽器 (*** 已修正版本 ***)
+     * 這是最關鍵的修正：我們現在傳入 Address 物件，並將監聽器(Observer)加到它上面。
+     */
+    /**
+     * 新增方法：為 Terminal 和 Address 新增監聽器 (*** 已修正版本 ***)
+     * 這是最關鍵的修正：我們現在傳入 Address 物件，並將監聽器(Observer)加到它上面。
+     */
+    private void addTerminalListener(String extension, Terminal terminal, Address address) {
+        try {
+            // 檢查此地址是否已有監聽器，避免重複添加
+            CallObserver[] existingObservers = address.getCallObservers();
+            if (existingObservers != null && existingObservers.length > 0) {
+                // 如果已經有監聽器，我們可以假設它就是我們需要的類型
+                // 為了保險起見，可以檢查一下監聽器類型，但通常跳過即可
+                System.out.println("[" + extension + "] ✅ CallObserver 已經存在於此地址，跳過重複設定。");
+                return;
+            }
+
+            CallObserver callObserver = new CallObserver() {
+                /**
+                 * 這是 JTAPI 處理所有事件的核心方法。
+                 * Avaya Server 的所有事件都會被送到這裡。
+                 */
+                @Override
+                public void callChangedEvent(CallEv[] eventList) {
+                    // 遍歷收到的事件陣列
+                    for (CallEv event : eventList) {
+                        // 為了方便除錯，先用 sout 輸出，正式環境建議用 Logger
+                        System.out.println("[JTAPI_EVENT] " + extension + " 收到事件: " + event.getClass().getSimpleName());
+
+                        // *** 非常重要：確保事件是來自正確的 Terminal ***
+                        TerminalConnection tc = null;
+                        if (event instanceof TermConnEv) {
+                            tc = ((TermConnEv) event).getTerminalConnection();
+                            
+                            // 調試：顯示 Terminal 資訊
+                            if (tc != null) {
+                                String eventTerminalName = tc.getTerminal().getName();
+                                String targetTerminalName = terminal.getName();
+                                System.out.println("[TERMINAL_DEBUG] 事件來源Terminal: " + eventTerminalName + ", 目標Terminal: " + targetTerminalName);
+                                
+                                // 只處理與我們目標 Terminal 相關的事件
+                                if (!eventTerminalName.equals(targetTerminalName)) {
+                                    System.out.println("[TERMINAL_DEBUG] Terminal不匹配，跳過此事件");
+                                    continue;
+                                } else {
+                                    System.out.println("[TERMINAL_DEBUG] Terminal匹配，處理此事件");
+                                }
+                            } else {
+                                System.out.println("[TERMINAL_DEBUG] 事件沒有TerminalConnection，直接處理");
+                            }
+                        } else {
+                            System.out.println("[TERMINAL_DEBUG] 不是TermConnEv事件，直接處理");
+                        }
+                        
+                        // 現在可以處理事件了 - 支援標準和 Avaya 特定事件
+                        String eventClassName = event.getClass().getSimpleName();
+                        System.out.println("[EVENT_DEBUG] 檢查事件: " + eventClassName);
+                        
+                        // 響鈴事件 - 支援多種事件類型
+                        if (event instanceof TermConnRingingEv || eventClassName.contains("TermConnCreated") || eventClassName.contains("Ringing")) {
+                            System.out.println(">>> [SSE_PUSH] " + extension + ": 電話響鈴 (RINGING). 事件: " + eventClassName);
+                            sendUpdateEvent(extension, "RINGING", "電話響鈴");
+                            
+                            // *** UUI-MODIFIED ***: 
+                            // 將事件物件 event 本身傳遞給 UuiService，在響鈴時嘗試提取 UUI
+                            System.out.println("[UUI_TRIGGER] 響鈴事件觸發 UUI 解析...");
+                            uuiService.extractAndStoreUuiData(event, extension);
+                            
+                        } else if (event instanceof TermConnActiveEv || eventClassName.contains("TermConnActive") || eventClassName.contains("Active")) {
+                            System.out.println(">>> [SSE_PUSH] " + extension + ": 電話變為活躍 (ACTIVE). 事件: " + eventClassName);
+                            sendUpdateEvent(extension, "ACTIVE", "電話變為活躍");
+                            
+                            // *** UUI-MODIFIED ***: 
+                            // 在接聽時也嘗試提取 UUI（以防響鈴時沒有成功）
+                            System.out.println("[UUI_TRIGGER] 通話活躍事件也嘗試 UUI 解析...");
+                            uuiService.extractAndStoreUuiData(event, extension);
+                            
+                        } else if (event instanceof TermConnDroppedEv || eventClassName.contains("Dropped") || eventClassName.contains("Disconnected")) {
+                            System.out.println(">>> [SSE_PUSH] " + extension + ": 電話被掛斷 (DROPPED). 事件: " + eventClassName);
+                            sendUpdateEvent(extension, "DROPPED", "電話被掛斷");
+                            
+                            // *** UUI-MODIFIED ***: 當電話掛斷時，通知 UuiService 清除資料
+                            uuiService.clearUuiData(extension);
+                            
+                        } else if (event instanceof CallCtlTermConnHeldEv || eventClassName.contains("Held")) {
+                            System.out.println(">>> [SSE_PUSH] " + extension + ": 電話被保持 (HELD). 事件: " + eventClassName);
+                            sendUpdateEvent(extension, "HELD", "電話被保持");
+                        } else {
+                            // 記錄未處理的事件類型以便調試
+                            System.out.println("[JTAPI_EVENT] " + extension + ": 未處理的事件類型: " + eventClassName);
+                        }
+                    }
+                }
+            };
+            
+            // *** 最關鍵的修正 ***
+            // 將監聽器(Observer)添加到 ADDRESS 上，而不是單一的現有通話(Call)。
+            // 這能確保此地址上所有未來的通話也都會被監聽到。
+            address.addCallObserver(callObserver);
+
+            System.out.println("[" + extension + "] ✅✅✅ 成功將 CallObserver 添加到 Address: " + address.getName());
+            System.out.println("[" + extension + "] 🎯 現在已開始監聽此分機的所有未來通話事件！");
+
+        } catch (Exception e) {
+            System.err.println("[" + extension + "] ❌ 將監聽器添加到 Address 失敗: " + e.getMessage());
+        }
+    }
+
+
+
     // ========================================
     // 以下是原有的輔助方法
     // ========================================

@@ -6,6 +6,8 @@ import javax.telephony.*;
 import javax.telephony.callcontrol.*;
 import javax.telephony.callcenter.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map; // *** SSE-MODIFIED ***: 引入 Map
+import java.util.HashMap; 
 
 @Service
 public class AgentService {
@@ -13,6 +15,8 @@ public class AgentService {
     @Autowired
     private PhoneCallService phoneCallService;
     
+    @Autowired
+    private SseService sseService;
     /**
      * Agent 狀態類
      */
@@ -113,6 +117,14 @@ public class AgentService {
                 // 設置 Agent 狀態監聽器
                 setupAgentStateListener(extension, agentId);
                 
+                // *** SSE-MODIFIED ***: 登入成功後發送事件
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "login");
+                eventData.put("agentId", agentId);
+                sseService.sendEvent(extension, "agent_event", eventData);
+                
+
+                // 記錄登入成功日誌
                 logToMemory("[AGENT] Agent " + agentId + " API 登入成功");
                 return "✅ Agent " + agentId + " 登入成功！(API)\n" +
                        "分機: " + extension + "\n" +
@@ -222,6 +234,13 @@ public class AgentService {
                 cleanupCallListener(extension);
                 cleanupConnectionListener(extension);
                 
+                // *** SSE-MODIFIED ***: 登出成功後發送事件
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "logout");
+                eventData.put("agentId", agentId);
+                sseService.sendEvent(extension, "agent_event", eventData);
+
+                // *** SSE-MODIFIED ***: 登出成功後發送事件
                 return "✅ Agent " + agentId + " 登出成功！(API)\n" +
                        "分機: " + extension + "\n" +
                        "登入時長: " + loginDuration + " 秒\n" +
@@ -1230,6 +1249,13 @@ public class AgentService {
                     localStatus.callHandlingMode = "MANUAL_IN";
                 }
                 
+                // *** SSE-MODIFIED ***: 狀態變更後發送事件
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "set_mode");
+                eventData.put("mode", "MANUAL_IN");
+                sseService.sendEvent(extension, "agent_event", eventData);
+                
+                // 返回成功訊息
                 return "✅ Manual-in 設定成功！(API)\n" +
                        "分機: " + extension + "\n" +
                        "執行時間: " + new java.util.Date() + "\n" +
@@ -1268,6 +1294,13 @@ public class AgentService {
                     localStatus.callHandlingMode = "AUTO_IN";
                 }
                 
+                // *** SSE-MODIFIED ***: 狀態變更後發送事件
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "set_mode");
+                eventData.put("mode", "AUTO_IN");
+                sseService.sendEvent(extension, "agent_event", eventData);
+
+
                 return "✅ Auto-in 設定成功！(API)\n" +
                        "分機: " + extension + "\n" +
                        "執行時間: " + new java.util.Date() + "\n" +
@@ -1306,6 +1339,13 @@ public class AgentService {
                     localStatus.status = "AUX";
                 }
                 
+                // *** SSE-MODIFIED ***: 狀態變更後發送事件
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("action", "set_mode");
+                eventData.put("mode", "AUX");
+                sseService.sendEvent(extension, "agent_event", eventData);
+
+
                 return "✅ AUX 狀態設定成功！(API)\n" +
                        "分機: " + extension + "\n" +
                        "執行時間: " + new java.util.Date() + "\n" +

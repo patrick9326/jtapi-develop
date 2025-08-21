@@ -81,7 +81,7 @@ public class MultiLineService {
             this.extension = extension;
             this.lines = new ArrayList<>();
             this.autoAnswerEnabled = false;
-            this.maxLines = 6; // 預設最多6線
+            this.maxLines = 3; // 預設最多6線
         }
         
         public String generateNextLineId() {
