@@ -3,7 +3,10 @@ package com.example.jtapi_develop;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import javax.telephony.*;
 
 
 /**
@@ -24,6 +27,9 @@ public class UnifiedPhoneController {
     
     @Autowired
     private SseService sseService;
+    
+    @Autowired
+    private MonitorService monitorService;
     // ========================================
     // 測試和診斷
     // ========================================
@@ -40,9 +46,129 @@ public class UnifiedPhoneController {
      * 前端將通過此 API 建立持久連接以接收伺服器事件
      * GET /api/unified-phone/events?ext=1420
      */
-    @GetMapping("/events")
+    @GetMapping(value = "/events", produces = "text/event-stream")
     public SseEmitter subscribeToEvents(@RequestParam String ext) {
+        System.out.println("[SSE] 收到SSE連接請求，分機: " + ext);
+        
+        // 為該分機設置JTAPI事件監聽器
+        phoneCallService.setupListenerForExtension(ext);
+        
         return sseService.addEmitter(ext);
+    }
+    
+    /**
+     * 測試SSE推送功能
+     * GET /api/unified-phone/test-sse?ext=1420&message=test
+     */
+    @GetMapping("/test-sse")
+    public String testSse(@RequestParam String ext, @RequestParam(defaultValue = "測試消息") String message) {
+        Map<String, String> eventData = new HashMap<>();
+        eventData.put("extension", ext);
+        eventData.put("eventType", "TEST");
+        eventData.put("message", message);
+        eventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        
+        sseService.sendEvent(ext, "phone_event", eventData);
+        return "已向分機 " + ext + " 發送測試SSE事件: " + message;
+    }
+    
+    /**
+     * SSE連接狀態查詢
+     * GET /api/unified-phone/sse-status?ext=1420
+     */
+    @GetMapping("/sse-status")
+    public String getSseStatus(@RequestParam String ext) {
+        int totalConnections = sseService.getActiveConnectionCount();
+        StringBuilder status = new StringBuilder();
+        
+        status.append("=== SSE連接狀態 ===\n");
+        status.append("查詢分機: ").append(ext).append("\n");
+        status.append("目前總連接數: ").append(totalConnections).append("\n");
+        status.append("伺服器時間: ").append(new java.util.Date()).append("\n");
+        
+        // 測試發送一個狀態事件
+        Map<String, String> testData = new HashMap<>();
+        testData.put("extension", ext);
+        testData.put("eventType", "STATUS_CHECK");
+        testData.put("message", "SSE狀態檢查");
+        testData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        
+        sseService.sendEvent(ext, "phone_event", testData);
+        status.append("✅ 已發送狀態檢查事件\n");
+        
+        return status.toString();
+    }
+    
+    /**
+     * 強制設置分機監聽器 - 確保JTAPI事件能推送
+     * GET /api/unified-phone/setup-listener?ext=1420
+     */
+    @GetMapping("/setup-listener")
+    public String setupListener(@RequestParam String ext) {
+        try {
+            return phoneCallService.forceSetupListener(ext);
+        } catch (Exception e) {
+            return "❌ 設置監聽器失敗: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 模擬電話事件推送
+     * GET /api/unified-phone/simulate-event?ext=1420&type=RINGING
+     */
+    @GetMapping("/simulate-event")
+    public String simulatePhoneEvent(@RequestParam String ext, 
+                                   @RequestParam(defaultValue = "RINGING") String type) {
+        Map<String, String> eventData = new HashMap<>();
+        eventData.put("extension", ext);
+        eventData.put("eventType", type);
+        
+        String message;
+        switch (type.toUpperCase()) {
+            case "RINGING":
+                message = "模擬來電響鈴";
+                break;
+            case "ACTIVE":
+                message = "模擬電話接通";
+                break;
+            case "DROPPED":
+                message = "模擬電話掛斷";
+                break;
+            case "HELD":
+                message = "模擬電話保持";
+                break;
+            default:
+                message = "模擬" + type + "事件";
+        }
+        
+        eventData.put("message", message);
+        eventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        
+        sseService.sendEvent(ext, "phone_event", eventData);
+        return "✅ 已模擬 " + type + " 事件推送到分機 " + ext + "\n訊息: " + message;
+    }
+    
+    /**
+     * 模擬監聽事件推送
+     * GET /api/unified-phone/simulate-monitor-event?ext=1420&action=start&type=SILENT&target=1424
+     */
+    @GetMapping("/simulate-monitor-event")
+    public String simulateMonitorEvent(@RequestParam String ext,
+                                     @RequestParam(defaultValue = "start") String action,
+                                     @RequestParam(defaultValue = "SILENT") String type,
+                                     @RequestParam(defaultValue = "1424") String target) {
+        Map<String, String> eventData = new HashMap<>();
+        eventData.put("action", action);
+        eventData.put("type", type);
+        eventData.put("supervisor", ext);
+        eventData.put("target", target);
+        eventData.put("status", "success");
+        eventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        
+        String message = String.format("模擬監聽事件: %s %s 監聽 %s", ext, action.equals("start") ? "開始" : "停止", target);
+        
+        sseService.sendEvent(ext, "monitor_event", eventData);
+        return "✅ 已模擬監聽事件推送到分機 " + ext + "\n訊息: " + message;
     }
     // ========================================
     // 基本通話控制（綠色/紅色按鍵）
@@ -67,6 +193,23 @@ public class UnifiedPhoneController {
     }
     
     /**
+     * 撥號 (POST版本 - 安全版本，參數不會暴露在URL中)
+     * POST /api/unified-phone/dial
+     * Body: {"ext": "1420", "number": "1424"}
+     */
+    @PostMapping("/dial")
+    public String dialPost(@RequestBody Map<String, String> request) {
+        String ext = request.get("ext");
+        String number = request.get("number");
+        
+        if (ext == null || number == null) {
+            return "❌ 參數錯誤：需要提供 ext 和 number";
+        }
+        
+        return phoneService.makeCall(ext, number);
+    }
+    
+    /**
      * 掛斷鍵 (紅色按鍵)
      * GET /api/unified-phone/hangup?ext=1420
      */
@@ -75,14 +218,7 @@ public class UnifiedPhoneController {
         return phoneService.hangupCurrentLine(ext);
     }
     
-    /**
-     * 掛斷指定線路
-     * GET /api/unified-phone/hangup-line?ext=1420&lineId=1420_L2
-     */
-    @GetMapping("/hangup-line")
-    public String hangupLine(@RequestParam String ext, @RequestParam String lineId) {
-        return phoneService.hangupSpecificLine(ext, lineId);
-    }
+
     
     // ========================================
     // 多線控制（線路管理）
@@ -270,6 +406,23 @@ public class UnifiedPhoneController {
         return phoneCallService.loginExtension(extension, password);
     }
     
+    /**
+     * 登入 (POST版本 - 安全版本，帳號密碼不會暴露在URL中)
+     * POST /api/unified-phone/login
+     * Body: {"extension": "ctiuser", "password": "Avaya123!"}
+     */
+    @PostMapping("/login")
+    public CompletableFuture<String> loginPost(@RequestBody Map<String, String> request) {
+        String extension = request.get("extension");
+        String password = request.get("password");
+        
+        if (extension == null || password == null) {
+            return CompletableFuture.completedFuture("❌ 參數錯誤：需要提供 extension 和 password");
+        }
+        
+        return phoneCallService.loginExtension(extension, password);
+    }
+    
     // ========================================
     // 新增/修改的 API 端點
     // ========================================
@@ -281,6 +434,58 @@ public class UnifiedPhoneController {
     @GetMapping("/unhold")
     public String unhold(@RequestParam String ext) {
         return phoneService.unholdCall(ext);
+    }
+    
+    /**
+     * 指定線路 Hold
+     * GET /api/unified-phone/hold-line?ext=1420&lineId=1420_L2
+     */
+    @GetMapping("/hold-line")
+    public String holdLine(@RequestParam String ext, @RequestParam String lineId) {
+        return phoneService.holdSpecificLine(ext, lineId);
+    }
+    
+    /**
+     * 指定線路 Hold (POST版本 - 安全版本)
+     * POST /api/unified-phone/hold-line
+     * Body: {"ext": "1420", "lineId": "1420_L2"}
+     */
+    @PostMapping("/hold-line")
+    public String holdLinePost(@RequestBody Map<String, String> request) {
+        String ext = request.get("ext");
+        String lineId = request.get("lineId");
+        
+        if (ext == null || lineId == null) {
+            return "❌ 參數錯誤：需要提供 ext 和 lineId";
+        }
+        
+        return phoneService.holdSpecificLine(ext, lineId);
+    }
+    
+    /**
+     * 指定線路 Unhold
+     * GET /api/unified-phone/unhold-line?ext=1420&lineId=1420_L2
+     */
+    @GetMapping("/unhold-line")
+    public String unholdLine(@RequestParam String ext, @RequestParam String lineId) {
+        return phoneService.unholdSpecificLine(ext, lineId);
+    }
+    
+    /**
+     * 指定線路 Unhold (POST版本 - 安全版本)
+     * POST /api/unified-phone/unhold-line
+     * Body: {"ext": "1420", "lineId": "1420_L2"}
+     */
+    @PostMapping("/unhold-line")
+    public String unholdLinePost(@RequestBody Map<String, String> request) {
+        String ext = request.get("ext");
+        String lineId = request.get("lineId");
+        
+        if (ext == null || lineId == null) {
+            return "❌ 參數錯誤：需要提供 ext 和 lineId";
+        }
+        
+        return phoneService.unholdSpecificLine(ext, lineId);
     }
 
     /**
@@ -309,6 +514,24 @@ public class UnifiedPhoneController {
     public String dialOnSpecificLine(@RequestParam String ext, 
                                     @RequestParam String number,
                                     @RequestParam(required = false) String lineId) {
+        return phoneService.makeCallOnSpecificLine(ext, number, lineId);
+    }
+    
+    /**
+     * 指定線路撥號 (POST版本 - 安全版本)
+     * POST /api/unified-phone/dial-on-line
+     * Body: {"ext": "1420", "number": "1424", "lineId": "1420_L3"}
+     */
+    @PostMapping("/dial-on-line")
+    public String dialOnSpecificLinePost(@RequestBody Map<String, String> request) {
+        String ext = request.get("ext");
+        String number = request.get("number");
+        String lineId = request.get("lineId");
+        
+        if (ext == null || number == null) {
+            return "❌ 參數錯誤：需要提供 ext 和 number";
+        }
+        
         return phoneService.makeCallOnSpecificLine(ext, number, lineId);
     }
 
@@ -378,5 +601,70 @@ public class UnifiedPhoneController {
     @GetMapping("/set-agent-status")
     public String setAgentStatus(@RequestParam String ext, @RequestParam String status) {
         return agentService.setAgentStatus(ext, status);
+    }
+    
+    /**
+     * 掛斷指定線路（支援模糊匹配）
+     * GET /api/unified-phone/hangup-line?ext=1420&lineId=1420_L1
+     */
+    @GetMapping("/hangup-line")
+    public String hangupLine(@RequestParam String ext, @RequestParam String lineId) {
+        return phoneService.hangupSpecificLine(ext, lineId);
+    }
+    
+    /**
+     * 掛斷指定線路 (POST版本 - 安全版本)
+     * POST /api/unified-phone/hangup-line
+     * Body: {"ext": "1420", "lineId": "1420_L1"}
+     */
+    @PostMapping("/hangup-line")
+    public String hangupLinePost(@RequestBody Map<String, String> request) {
+        String ext = request.get("ext");
+        String lineId = request.get("lineId");
+        
+        if (ext == null || lineId == null) {
+            return "❌ 參數錯誤：需要提供 ext 和 lineId";
+        }
+        
+        return phoneService.hangupSpecificLine(ext, lineId);
+    }
+    
+    /**
+     * 測試監聽面板SSE功能
+     * GET /api/unified-phone/test-monitor-sse?ext=1420
+     */
+    @GetMapping("/test-monitor-sse")
+    public String testMonitorSse(@RequestParam String ext) {
+        StringBuilder result = new StringBuilder();
+        result.append("=== 測試監聽面板SSE功能 ===\n");
+        
+        // 模擬開始監聽事件
+        Map<String, String> startEvent = new HashMap<>();
+        startEvent.put("action", "start");
+        startEvent.put("type", "SILENT");
+        startEvent.put("supervisor", ext);
+        startEvent.put("target", "1424");
+        startEvent.put("status", "success");
+        sseService.sendEvent(ext, "monitor_event", startEvent);
+        result.append("✅ 已發送開始監聽事件\n");
+        
+        // 等待 2 秒
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        // 模擬停止監聽事件
+        Map<String, String> stopEvent = new HashMap<>();
+        stopEvent.put("action", "stop");
+        stopEvent.put("supervisor", ext);
+        stopEvent.put("status", "success");
+        sseService.sendEvent(ext, "monitor_event", stopEvent);
+        result.append("✅ 已發送停止監聽事件\n");
+        
+        result.append("\n測試完成！請檢查監聽面板是否自動更新。");
+        
+        return result.toString();
     }
 }

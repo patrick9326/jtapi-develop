@@ -40,7 +40,19 @@
       "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/multiline/hangup?extension=1420&lineId=1420_L1\")",
       "Bash(timeout 15 curl -X GET \"http://localhost:8080/api/unified-phone/conference?ext=1420\")",
       "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/conference/status\")",
-      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/unified-phone/hangup-line?ext=1420&lineId=1420_L2\")"
+      "Bash(timeout 10 curl -X GET \"http://localhost:8080/api/unified-phone/hangup-line?ext=1420&lineId=1420_L2\")",
+      "Bash(find:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(jar:*)",
+      "Bash(cat:*)",
+      "Bash(javap:*)",
+      "Bash(timeout:*)",
+      "Bash(rm:*)",
+      "WebFetch(domain:downloads.avaya.com)",
+      "Bash(taskkill:*)",
+      "Bash(cmd /c:*)",
+      "WebFetch(domain:)",
+      "Bash(tasklist)"
     ],
     "deny": []
   }

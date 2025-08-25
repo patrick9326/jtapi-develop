@@ -4,7 +4,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import javax.telephony.*;
 import javax.telephony.callcontrol.*;
+
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
 
 @Service
 public class TransferService {
@@ -12,9 +16,11 @@ public class TransferService {
     @Autowired
     private PhoneCallService phoneCallService;
     
-    @Autowired
-    private MethodLogService methodLogService;
     
+     @Autowired
+    private SseService sseService;
+    
+
     // 用於追蹤轉接狀態的內部類
     private static class TransferSession {
         String transferringExtension;  // 發起轉接的分機
@@ -118,7 +124,6 @@ public class TransferService {
         } catch (Exception e) {
             System.err.println("[BLIND_TRANSFER] 轉接失敗: " + e.getMessage());
             e.printStackTrace();
-            methodLogService.logFailure("一段轉接", "轉接失敗", e.getMessage(), extension, targetExtension);
             return "一段轉接失敗: " + e.getMessage();
         }
     }
@@ -187,9 +192,14 @@ public class TransferService {
             extensionToSessionMap.put(extension, session.sessionId);  // 新增：分機→會話映射
             
             System.out.println("[ATTENDED_TRANSFER] 諮詢通話已建立，會話ID: " + session.sessionId);
-            // 記錄開始二段轉接
-            methodLogService.logSuccess("二段轉接", "開始諮詢通話", 
-                "Hold原通話並撥打目標分機", extension, targetExtension);
+            
+            // *** SSE-MODIFIED ***: 二段轉接開始後推送事件
+            Map<String, String> transferStartEventData = new HashMap<>();
+            transferStartEventData.put("action", "attended_transfer_started");
+            transferStartEventData.put("target", targetExtension);
+            transferStartEventData.put("sessionId", session.sessionId);
+            transferStartEventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+            sseService.sendEvent(extension, "phone_event", transferStartEventData);
             
             return "二段轉接已開始：正在連接 " + targetExtension + "，會話ID: " + session.sessionId + 
                    "\n提示：請等待目標分機接聽，然後調用完成轉接 API";
@@ -198,7 +208,6 @@ public class TransferService {
             System.err.println("[ATTENDED_TRANSFER] 開始轉接失敗: " + e.getMessage());
             e.printStackTrace();
             extensionToSessionMap.remove(extension);  // 清理映射
-            methodLogService.logFailure("二段轉接", "開始轉接失敗", e.getMessage(), extension, targetExtension);
             return "二段轉接開始失敗: " + e.getMessage();
         }
     }
@@ -302,11 +311,24 @@ public String completeAttendedTransfer(String sessionId) {
             extensionToSessionMap.remove(session.transferringExtension);
             debugInfo.append("轉接完成，會話已清理\n");
             
-            // 記錄成功的二段轉接完成方法
-            methodLogService.logSuccess("二段轉接", "AVAYA標準完成方法", 
-                "使用consultCall.transfer(originalCall)", session.transferringExtension, session.targetExtension);
             
             debugInfo.append("=== 轉接成功完成 ===\n");
+
+            // *** SSE-MODIFIED ***: 轉接完成後，發送 phone_event 通知前端刷新線路
+            Map<String, String> eventData = new HashMap<>();
+            eventData.put("action", "transfer_complete");
+            eventData.put("target", session.targetExtension);
+            eventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+            sseService.sendEvent(session.transferringExtension, "phone_event", eventData);
+            
+            // *** 新增：通知轉接目標 ***
+            Map<String, String> targetEventData = new HashMap<>();
+            targetEventData.put("action", "transfer_received");
+            targetEventData.put("from", session.transferringExtension);
+            targetEventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+            sseService.sendEvent(session.targetExtension, "phone_event", targetEventData);
+            
+
             return debugInfo.toString() + "\n結果：二段轉接成功完成！";
             
         } catch (Exception transferException) {
@@ -318,9 +340,6 @@ public String completeAttendedTransfer(String sessionId) {
                 heldControlCall.transfer(consultControlCall);
                 debugInfo.append("備用轉接方法成功\n");
                 
-                // 記錄備用轉接方法成功
-                methodLogService.logSuccess("二段轉接", "備用完成方法", 
-                    "使用originalCall.transfer(consultCall)", session.transferringExtension, session.targetExtension);
                 
                 activeTransfers.remove(sessionId);
                 extensionToSessionMap.remove(session.transferringExtension);
@@ -351,9 +370,6 @@ public String completeAttendedTransfer(String sessionId) {
                         Connection transferResult = heldControlCall.transfer(session.targetExtension);
                         debugInfo.append("單步轉接執行成功\n");
                         
-                        // 記錄單步轉接方法成功
-                        methodLogService.logSuccess("二段轉接", "單步轉接方法", 
-                            "使用heldCall.transfer(targetExtension)", session.transferringExtension, session.targetExtension);
                         
                         activeTransfers.remove(sessionId);
                         extensionToSessionMap.remove(session.transferringExtension);
@@ -888,6 +904,12 @@ public String validateTransferReadiness(String extension) {
                 }
             }
             
+            // *** SSE-MODIFIED ***: 轉接取消後推送事件
+            Map<String, String> cancelEventData = new HashMap<>();
+            cancelEventData.put("action", "transfer_cancelled");
+            cancelEventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+            sseService.sendEvent(session.transferringExtension, "phone_event", cancelEventData);
+            
             return "二段轉接已取消，原始通話已恢復";
             
         } catch (Exception e) {
@@ -1130,12 +1152,19 @@ public String validateTransferReadiness(String extension) {
         activeTransfers.entrySet().removeIf(entry -> {
             TransferSession session = entry.getValue();
             if (currentTime - session.startTime > fiveMinutes) {
-                System.out.println("[TRANSFER_CLEANUP] 清理過期會話: " + entry.getKey());
+                System.out.println("[TRANSFER_CLEANUP] 清理過期轉接: " + entry.getKey());
                 try {
+                    // *** SSE-MODIFIED ***: 轉接過期清理後推送事件
+                    Map<String, String> expiredEventData = new HashMap<>();
+                    expiredEventData.put("action", "transfer_expired");
+                    expiredEventData.put("reason", "轉接超時自動清理");
+                    expiredEventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+                    sseService.sendEvent(session.transferringExtension, "phone_event", expiredEventData);
+                    
                     cancelAttendedTransfer(entry.getKey());
                     extensionToSessionMap.remove(session.transferringExtension);
                 } catch (Exception e) {
-                    System.err.println("[TRANSFER_CLEANUP] 清理會話時發生錯誤: " + e.getMessage());
+                    System.err.println("[TRANSFER_CLEANUP] 清理轉接時發生錯誤: " + e.getMessage());
                 }
                 return true;
             }
@@ -1188,9 +1217,6 @@ public String validateTransferReadiness(String extension) {
                     System.out.println("[BLIND_TRANSFER] 執行 redirect: " + originalCaller + " → " + targetExtension);
                     controlConn.redirect(targetExtension);
                     
-                    // 記錄成功的方法
-                    methodLogService.logSuccess("一段轉接", "Redirect方法", 
-                        "使用CallControlConnection.redirect()成功", extension, targetExtension);
                     
                     return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 redirect 方法）";
                 }
@@ -1264,9 +1290,6 @@ public String validateTransferReadiness(String extension) {
                 System.out.println("[BLIND_TRANSFER] 轉接到外部號碼，無新連線返回");
             }
             
-            // 記錄成功的方法
-            methodLogService.logSuccess("一段轉接", "JTAPI Single-Step Transfer", 
-                "使用CallControlCall.transfer()成功", extension, targetExtension);
             
             return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 JTAPI single-step transfer）";
             
@@ -1310,9 +1333,6 @@ public String validateTransferReadiness(String extension) {
                 
                 System.out.println("[BLIND_TRANSFER] 備用方案成功: " + originalCaller + " → " + targetExtension);
                 
-                // 記錄成功的方法
-                methodLogService.logSuccess("一段轉接", "斷開重連備用方法", 
-                    "先斷開轉接者連線，再讓原來電者撥打目標", extension, targetExtension);
                 
                 return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用備用方法）";
                 
@@ -1377,9 +1397,6 @@ public String validateTransferReadiness(String extension) {
                 }
             }
             
-            // 記錄成功的方法
-            methodLogService.logSuccess("一段轉接", "會議轉接方法", 
-                "Hold原通話→撥打目標→建立會議→退出會議", extension, targetExtension);
             
             return "一段轉接成功：" + originalCaller + " 的通話已轉接到分機 " + targetExtension + "（使用 conference 方法）";
         } else {

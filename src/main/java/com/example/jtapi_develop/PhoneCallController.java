@@ -3,6 +3,7 @@ package com.example.jtapi_develop;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/phone")
@@ -12,49 +13,84 @@ public class PhoneCallController {
     private PhoneCallService phoneCallService;
     
     /**
-     * 登入分機
-     * GET /api/phone/login?extension=2510043&password=password456
+     * 登入分機 (POST版本 - 安全版本)
+     * POST /api/phone/login
+     * Body: {"extension": "2510043", "password": "password456"}
      */
-    @GetMapping("/login")
-    public CompletableFuture<String> login(@RequestParam String extension,
-                                         @RequestParam String password) {
+    @PostMapping("/login")
+    public CompletableFuture<String> login(@RequestBody Map<String, String> request) {
+        String extension = request.get("extension");
+        String password = request.get("password");
+        
+        if (extension == null || password == null) {
+            return CompletableFuture.completedFuture("❌ 參數錯誤：需要提供 extension 和 password");
+        }
+        
         return phoneCallService.loginExtension(extension, password);
     }
     
     /**
-     * 撥打電話
-     * GET /api/phone/call?caller=2510043&callee=2510044
+     * 撥打電話 (POST版本 - 安全版本)
+     * POST /api/phone/call
+     * Body: {"caller": "2510043", "callee": "2510044"}
      */
-    @GetMapping("/call")
-    public String makeCall(@RequestParam String caller,
-                          @RequestParam String callee) {
+    @PostMapping("/call")
+    public String makeCall(@RequestBody Map<String, String> request) {
+        String caller = request.get("caller");
+        String callee = request.get("callee");
+        
+        if (caller == null || callee == null) {
+            return "❌ 參數錯誤：需要提供 caller 和 callee";
+        }
+        
         return phoneCallService.makeCall(caller, callee);
     }
     
     /**
-     * 接聽電話
-     * GET /api/phone/answer?extension=2510044
+     * 接聽電話 (POST版本 - 安全版本)
+     * POST /api/phone/answer
+     * Body: {"extension": "2510044"}
      */
-    @GetMapping("/answer")
-    public String answerCall(@RequestParam String extension) {
+    @PostMapping("/answer")
+    public String answerCall(@RequestBody Map<String, String> request) {
+        String extension = request.get("extension");
+        
+        if (extension == null) {
+            return "❌ 參數錯誤：需要提供 extension";
+        }
+        
         return phoneCallService.answerCall(extension);
     }
     
     /**
-     * 掛斷電話
-     * GET /api/phone/hangup?extension=2510043
+     * 掛斷電話 (POST版本 - 安全版本)
+     * POST /api/phone/hangup
+     * Body: {"extension": "2510043"}
      */
-    @GetMapping("/hangup")
-    public String hangupCall(@RequestParam String extension) {
+    @PostMapping("/hangup")
+    public String hangupCall(@RequestBody Map<String, String> request) {
+        String extension = request.get("extension");
+        
+        if (extension == null) {
+            return "❌ 參數錯誤：需要提供 extension";
+        }
+        
         return phoneCallService.hangupCall(extension);
     }
     
     /**
-     * 登出分機
-     * GET /api/phone/logout?extension=2510043
+     * 登出分機 (POST版本 - 安全版本)
+     * POST /api/phone/logout
+     * Body: {"extension": "2510043"}
      */
-    @GetMapping("/logout")
-    public String logout(@RequestParam String extension) {
+    @PostMapping("/logout")
+    public String logout(@RequestBody Map<String, String> request) {
+        String extension = request.get("extension");
+        
+        if (extension == null) {
+            return "❌ 參數錯誤：需要提供 extension";
+        }
+        
         return phoneCallService.logoutExtension(extension);
     }
     

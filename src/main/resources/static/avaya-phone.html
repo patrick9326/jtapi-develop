@@ -469,24 +469,72 @@
             border-radius: 5px;
             font-weight: bold;
         }
+
+        .uui-popup {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 5px 25px rgba(0,0,0,0.2);
+            z-index: 2000;
+            overflow: hidden;
+            border-top: 5px solid #007bff;
+            transition: all 0.3s ease-in-out;
+        }
+
+        .uui-header {
+            background-color: #f8f9fa;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .uui-header h3 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .uui-close-btn {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #6c757d;
+        }
+
+        .uui-content {
+            padding: 15px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .uui-content strong {
+            color: #495057;
+        }
     </style>
 </head>
 <body>
     <div class="login-container" id="loginContainer">
         <h1>Avaya 系統登入</h1>
         <div class="form-group">
-            <label for="username">帳號:</label>
-            <input type="text" id="username" name="username" required>
+            <label for="extension">控制分機號碼:</label>
+            <input type="text" id="extension" name="extension" value="" placeholder="請輸入分機號碼" required>
         </div>
         <div class="form-group">
-            <label for="password">密碼:</label>
-            <input type="password" id="password" name="password" required>
+            <label for="agentId">Agent 帳號:</label>
+            <input type="text" id="agentId" name="agentId" value="2420" required>
         </div>
         <button type="button" class="login-btn" onclick="login()">登入</button>
     </div>
 
     <div class="phone-interface" id="phoneInterface">
-        <div class="agent-status" id="agentStatus">分機: 1420 | 未登入Agent</div>
+        <div class="agent-status" id="agentStatus">未登入</div>
         <button class="logout-btn" onclick="logout()">登出</button>
         
         <div class="control-bar">
@@ -505,24 +553,22 @@
             </div>
             
             <div class="dropdown">
-                <button class="control-btn agent" onclick="toggleAgent()" id="agentBtn">Agent</button>
+                <button class="control-btn agent" onclick="toggleAgentDropdown()" id="agentBtn">Agent 狀態</button>
                 <div class="dropdown-content" id="agentDropdown">
                     <a onclick="setAgentMode('manual-in')">Manual-in</a>
                     <a onclick="setAgentMode('auto-in')">Auto-in</a>
                     <a onclick="setAgentMode('aux')">AUX</a>
-                    <a onclick="agentLogout()">登出</a>
                 </div>
             </div>
             
             <button class="control-btn monitor" onclick="openMonitor()">監聽</button>
             <button class="control-btn" onclick="openMultiline()" style="background: #28a745; color: white;">多線</button>
-            <button class="control-btn" onclick="openMethodLog()" style="background: #17a2b8; color: white;">方法記錄</button>
         </div>
         
         <!-- 多線控制區域 -->
         <div id="multilinePanel" style="display: none; margin-top: 20px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0; color: #333;">分機 1420 - 多線控制</h3>
+                <h3 style="margin: 0; color: #333;" id="multilineTitle">多線控制</h3>
                 <button onclick="closeMultiline()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">關閉</button>
             </div>
             
@@ -537,23 +583,13 @@
         </div>
     </div>
 
-    <div class="modal" id="agentModal">
-        <div class="modal-content">
-            <h2>Agent 登入</h2>
-            <input type="text" class="modal-input" id="agentNumber" placeholder="請輸入Agent號碼">
-            <div>
-                <button class="modal-btn primary" onclick="agentLogin()">登入</button>
-                <button class="modal-btn secondary" onclick="closeAgentModal()">取消</button>
-            </div>
-        </div>
-    </div>
 
     <div class="modal" id="dialModal">
         <div class="modal-content">
-            <h2>撥號 - 分機 1420</h2>
+            <h2 id="dialTitle">撥號</h2>
             <input type="text" class="modal-input" id="dialNumber" placeholder="請輸入要撥打的電話號碼" autofocus>
             <div style="margin: 15px 0; font-size: 14px; color: #666;">
-                使用分機 1420 撥打電話
+                <span id="dialDescription">撥打電話</span>
             </div>
             <div>
                 <button class="modal-btn primary" onclick="makeCall()">撥號</button>
@@ -565,7 +601,11 @@
     <div class="monitor-window" id="monitorWindow">
         <div class="monitor-header">
             <h3>監聽列表</h3>
-            <button style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px;" onclick="closeMonitor()">關閉</button>
+            <div style="display: flex; gap: 8px;">
+                <button style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;" onclick="testMonitorSse()" title="測試SSE功能">🧪</button>
+                <button style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;" onclick="refreshMonitorList()" title="手動刷新列表">🔄</button>
+                <button style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px;" onclick="closeMonitor()">關閉</button>
+            </div>
         </div>
         <ul class="extension-list" id="extensionList">
             <li class="extension-item">
@@ -590,47 +630,18 @@
                 </div>
             </li>
         </ul>
-        <div id="monitorStatus" style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border-left: 4px solid #2196f3; display: none;">
+        <div id="monitorStatus" style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border-left: 4px solid #2196f3; display: block;">
             <div style="margin-bottom: 10px;">
                 <strong>🎧 監聽狀態:</strong> <span id="currentMonitor"></span>
             </div>
             <div style="display: flex; gap: 10px;">
-                <button class="modal-btn primary" onclick="stopMonitor()" style="background: #dc3545;">退出監聽</button>
-                <button class="action-btn intrude-btn" onclick="intrudeFromMonitor()">闖入通話</button>
-                <button class="modal-btn" onclick="hangupMonitor()" style="background: #ff6b6b;">掛斷監聽</button>
-                <button class="modal-btn" onclick="refreshMonitorList()" style="background: #6c757d;">刷新列表</button>
+                <button class="modal-btn primary" onclick="stopMonitor()" style="background: #dc3545;">掛斷</button>
+            </div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6; font-size: 12px; color: #666;">
+                🔄 列表每1秒自動更新
             </div>
         </div>
 
-        <!-- 方法記錄面板 -->
-        <div id="methodLogPanel" style="display: none; margin-top: 20px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0; color: #333;">方法成功記錄</h3>
-                <div>
-                    <button onclick="refreshMethodLog()" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin-right: 10px;">刷新</button>
-                    <button onclick="clearMethodLog()" style="background: #ffc107; color: black; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin-right: 10px;">清除記錄</button>
-                    <button onclick="closeMethodLog()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">關閉</button>
-                </div>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="margin-right: 10px; font-weight: bold;">顯示類型：</label>
-                <select id="logTypeSelect" onchange="changeLogType()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 3px;">
-                    <option value="all">所有記錄</option>
-                    <option value="statistics">統計分析</option>
-                    <option value="一段轉接">一段轉接</option>
-                    <option value="二段轉接">二段轉接</option>
-                    <option value="會議">會議</option>
-                    <option value="撥號">撥號</option>
-                    <option value="Hold">Hold操作</option>
-                    <option value="Agent">Agent操作</option>
-                </select>
-            </div>
-            
-            <div id="methodLogContent" style="background: #f8f9fa; padding: 15px; border-radius: 5px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 13px; white-space: pre-line; line-height: 1.4;">
-                載入中...
-            </div>
-        </div>
     </div>
 
     <script>
@@ -639,46 +650,138 @@
         let currentAgentNumber = '';
         let currentMonitorTarget = '';
         let eventSource = null; 
-        const currentExtension = '1420';
+        let currentExtension = '';
+        
+        // 状态缓存，防止闪烁
+        let extensionStatusCache = {
+            '1411': { status: '空閒', lastBusyTime: 0 },
+            '1424': { status: '空閒', lastBusyTime: 0 },
+            '1422': { status: '空閒', lastBusyTime: 0 }
+        };
 
         async function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            const extension = document.getElementById('extension').value;
+            const agentId = document.getElementById('agentId').value;
             
-            if (username && password) {
+            if (extension && agentId) {
                 try {
-                    // 發送登入請求到後端
-                    const response = await fetch(`/api/unified-phone/login?extension=${username}&password=${password}`);
-                    const result = await response.text();
+                    // 設置當前控制的分機號碼和Agent帳號
+                    currentExtension = extension;
+                    currentAgentNumber = agentId;
                     
-                    if (result.includes('成功') || result.includes('登入')) {
+                    // 1. 先進行CTI登入
+                    const ctiResponse = await fetch(`/api/unified-phone/login?extension=ctiuser&password=Avaya123!`);
+                    const ctiResult = await ctiResponse.text();
+                    
+                    if (!(ctiResult.includes('成功') || ctiResult.includes('登入'))) {
+                        alert('CTI登入失敗：' + ctiResult);
+                        return;
+                    }
+                    
+                    // 2. 進行Agent登入 (POST方式)
+                    const agentResponse = await fetch('/api/agent/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            extension: currentExtension,
+                            agentId: agentId
+                        })
+                    });
+                    const agentResult = await agentResponse.text();
+                    
+                    if (agentResult.includes('成功') || agentResult.includes('已登入')) {
+                        // 登入成功
                         document.getElementById('loginContainer').style.display = 'none';
                         document.getElementById('phoneInterface').style.display = 'block';
                         isLoggedIn = true;
-                        alert('登入成功！' + result);
-                        // ================== 新增/修改處 ==================
-            // 登入成功後，開始監聽來自伺服器的即時事件
-            connectToSseEvents();
-            // ===============================================
+                        agentLoggedIn = true;
+                        
+                        // 更新多線控制和撥號標題
+                        document.getElementById('multilineTitle').textContent = `分機 ${currentExtension} - 多線控制`;
+                        document.getElementById('dialTitle').textContent = `撥號 - 分機 ${currentExtension}`;
+                        document.getElementById('dialDescription').textContent = `使用分機 ${currentExtension} 撥打電話`;
+                        
+                        alert('登入成功！CTI和Agent都已登入');
+                        console.log('🚀 登入成功，開始建立SSE連接並刷新畫面...');
+
+                        // 3. 建立 SSE 連線
+                        connectToSseEvents();
+
+                        // 4. 自動設定為 AUX 狀態，避免狀態檢測混淆
+                        setTimeout(async () => {
+                            try {
+                                console.log('🔧 登入後自動設定為 AUX 狀態...');
+                                const auxResponse = await fetch('/api/agent/aux', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        extension: currentExtension
+                                    })
+                                });
+                                const auxResult = await auxResponse.text();
+                                console.log('AUX 設定結果:', auxResult);
+                                
+                                // 更新介面顯示為 AUX 狀態
+                                document.getElementById('agentStatus').textContent = `分機: ${currentExtension} | Agent: ${agentId} | 狀態: AUX`;
+                                
+                                // 刷新畫面狀態
+                                refreshLines();
+                                checkIncomingCallsStatus();
+                            } catch (error) {
+                                console.error('自動設定 AUX 狀態失敗:', error);
+                                // 即使 AUX 設定失敗，仍然顯示預設狀態
+                                document.getElementById('agentStatus').textContent = `分機: ${currentExtension} | Agent: ${agentId} | 狀態: 待機`;
+                                refreshLines();
+                                checkIncomingCallsStatus();
+                            }
+                        }, 1000); // 延遲 1 秒等待 Agent 登入完全穩定
+
                     } else {
-                        alert('登入失敗：' + result);
+                        alert('Agent登入失敗：' + agentResult);
                     }
                 } catch (error) {
                     alert('登入失敗：' + error.message);
                 }
             } else {
-                alert('請輸入帳號和密碼');
+                alert('請輸入分機號碼和Agent帳號');
             }
         }
 
-        function logout() {
-            document.getElementById('loginContainer').style.display = 'block';
-            document.getElementById('phoneInterface').style.display = 'none';
-            isLoggedIn = false;
-            agentLoggedIn = false;
-            currentAgentNumber = '';
-            document.getElementById('agentStatus').textContent = '分機: 1420 | 未登入Agent';
-            document.getElementById('agentBtn').textContent = 'Agent';
+        async function logout() {
+            try {
+                // 1. 登出Agent (POST方式)
+                if (agentLoggedIn && currentAgentNumber) {
+                    await fetch('/api/agent/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            extension: currentExtension
+                        })
+                    });
+                    console.log('Agent已登出');
+                }
+                
+                // 2. 關閉SSE連接
+                stopAutoRefresh();
+                
+                // 3. 更新UI狀態
+                document.getElementById('loginContainer').style.display = 'block';
+                document.getElementById('phoneInterface').style.display = 'none';
+                isLoggedIn = false;
+                agentLoggedIn = false;
+                currentAgentNumber = '';
+                document.getElementById('agentStatus').textContent = '未登入';
+                
+                console.log('系統登出完成');
+            } catch (error) {
+                console.error('登出時發生錯誤:', error);
+            }
             alert('已登出');
         }
 
@@ -694,8 +797,42 @@
 
         async function hangup() {
             try {
-                const response = await fetch(`/api/unified-phone/hangup?ext=${currentExtension}`);
-                const result = await response.text();
+                // 先獲取當前線路狀態，找到活躍線路
+                const statusResponse = await fetch(`/api/unified-phone/server-lines?ext=${currentExtension}`);
+                const statusResult = await statusResponse.text();
+                
+                // 解析活躍線路ID
+                let activeLineId = null;
+                const lines = statusResult.split('\n');
+                
+                for (let line of lines) {
+                    const connectionMatch = line.match(/連線\s+(\d+)(?:\s*\[LineID:\s*([^\]]+)\])?\s*:\s*(.*)/);
+                    if (connectionMatch) {
+                        const lineId = connectionMatch[2];
+                        const connectionInfo = connectionMatch[3];
+                        
+                        // 找到通話中且非Hold狀態的線路
+                        if (connectionInfo.includes('🟢') && connectionInfo.includes('通話中') && 
+                            !connectionInfo.includes('[HELD]')) {
+                            activeLineId = lineId;
+                            break;
+                        }
+                    }
+                }
+                
+                let response, result;
+                
+                if (activeLineId) {
+                    // 有活躍線路，掛斷指定線路
+                    console.log('掛斷活躍線路:', activeLineId);
+                    response = await fetch(`/api/unified-phone/hangup-line?ext=${currentExtension}&lineId=${encodeURIComponent(activeLineId)}`);
+                } else {
+                    // 沒有明確的活躍線路，使用通用掛斷
+                    console.log('使用通用掛斷');
+                    response = await fetch(`/api/unified-phone/hangup?ext=${currentExtension}`);
+                }
+                
+                result = await response.text();
                 alert(result);
             } catch (error) {
                 alert('掛斷失敗: ' + error.message);
@@ -720,7 +857,7 @@
                         transferType = '一段轉接 (盲轉)';
                         const blindTarget = prompt('請輸入要轉接的分機號碼:');
                         if (!blindTarget) return;
-                        apiEndpoint = `http://localhost:8080/api/transfer/blind?extension=1420&target=${blindTarget}`;
+                        apiEndpoint = `/api/transfer/blind?extension=${currentExtension}&target=${blindTarget}`;
                         break;
                         
                     case 'attended': 
@@ -729,7 +866,7 @@
                             transferType = '開始二段轉接';
                             const attendedTarget = prompt('請輸入要轉接的分機號碼:');
                             if (!attendedTarget) return;
-                            apiEndpoint = `http://localhost:8080/api/transfer/attended/start?extension=1420&target=${attendedTarget}`;
+                            apiEndpoint = `/api/transfer/attended/start?extension=${currentExtension}&target=${attendedTarget}`;
                             attendedTransferInProgress = true;
                             
                             // 延遲2秒後顯示完成/取消選項
@@ -746,7 +883,7 @@
                         transferType = '三方會議';
                         const conferenceTarget = prompt('請輸入第三方號碼:');
                         if (!conferenceTarget) return;
-                        apiEndpoint = `http://localhost:8080/api/conference/start?host=1420&invited=${conferenceTarget}`;
+                        apiEndpoint = `/api/conference/start?host=${currentExtension}&invited=${conferenceTarget}`;
                         
                         // 延遲2秒後顯示建立/取消選項
                         setTimeout(() => {
@@ -783,7 +920,7 @@
         // 完成二段轉接
         async function completeAttendedTransfer() {
             try {
-                const response = await fetch('http://localhost:8080/api/transfer/attended/complete-by-extension?extension=1420');
+                const response = await fetch(`/api/transfer/attended/complete-by-extension?extension=${currentExtension}`);
                 const result = await response.text();
                 alert('完成轉接: ' + result);
                 attendedTransferInProgress = false;
@@ -795,7 +932,7 @@
         // 取消二段轉接
         async function cancelAttendedTransfer() {
             try {
-                const response = await fetch('http://localhost:8080/api/transfer/attended/cancel-by-extension?extension=1420');
+                const response = await fetch(`/api/transfer/attended/cancel-by-extension?extension=${currentExtension}`);
                 const result = await response.text();
                 alert('取消轉接: ' + result);
                 attendedTransferInProgress = false;
@@ -818,7 +955,7 @@
         // 建立三方會議
         async function establishConference() {
             try {
-                const response = await fetch('http://localhost:8080/api/conference/establish?host=1420');
+                const response = await fetch(`/api/conference/establish?host=${currentExtension}`);
                 const result = await response.text();
                 alert('建立會議: ' + result);
             } catch (error) {
@@ -829,7 +966,7 @@
         // 取消三方會議
         async function cancelConference() {
             try {
-                const response = await fetch('http://localhost:8080/api/conference/cancel?host=1420');
+                const response = await fetch(`/api/conference/cancel?host=${currentExtension}`);
                 const result = await response.text();
                 alert('取消會議: ' + result);
             } catch (error) {
@@ -853,12 +990,12 @@
             if (number) {
                 try {
                     // 先確保 CTI 登入
-                    const loginResponse = await fetch('http://localhost:8080/api/unified-phone/login?extension=ctiuser&password=Avaya123!');
+                    const loginResponse = await fetch('/api/unified-phone/login?extension=ctiuser&password=Avaya123!');
                     const loginResult = await loginResponse.text();
                     console.log('CTI 登入:', loginResult);
                     
                     // 撥號
-                    const response = await fetch(`http://localhost:8080/api/unified-phone/dial?ext=1420&number=${number}`);
+                    const response = await fetch(`/api/unified-phone/dial?ext=${currentExtension}&number=${number}`);
                     const result = await response.text();
                     alert(result);
                     document.getElementById('dialNumber').value = '';
@@ -871,66 +1008,34 @@
             }
         }
 
-        function toggleAgent() {
-            if (!agentLoggedIn) {
-                document.getElementById('agentModal').style.display = 'block';
-            } else {
-                const dropdown = document.getElementById('agentDropdown');
-                dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
-            }
+        function toggleAgentDropdown() {
+            const dropdown = document.getElementById('agentDropdown');
+            dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
         }
 
-        function closeAgentModal() {
-            document.getElementById('agentModal').style.display = 'none';
-        }
 
-        async function agentLogin() {
-            const agentNumber = document.getElementById('agentNumber').value;
-            if (agentNumber) {
-                try {
-                    const response = await fetch(`/api/agent/login?extension=${currentExtension}&agentId=${agentNumber}`);
-                    const result = await response.text();
-                    
-                    if (result.includes('成功') || result.includes('已登入')) {
-                        agentLoggedIn = true;
-                        currentAgentNumber = agentNumber;
-                        document.getElementById('agentStatus').textContent = '分機: 1420 | Agent: ' + agentNumber + ' | 狀態: 待機';
-                        document.getElementById('agentBtn').textContent = 'Agent ▼';
-                        closeAgentModal();
-                        alert(result);
-                        
-                        // 登入後獲取當前Agent狀態
-                        setTimeout(() => {
-                            updateAgentStatusDisplay();
-                        }, 1000);
-                    } else {
-                        alert('Agent登入失敗: ' + result);
-                    }
-                } catch (error) {
-                    alert('Agent登入失敗: ' + error.message);
-                }
-            } else {
-                alert('請輸入Agent號碼');
-            }
-        }
 
         async function setAgentMode(mode) {
             if (agentLoggedIn) {
                 let modeText = '';
                 let apiEndpoint = '';
                 
+                let requestBody = {
+                    extension: currentExtension
+                };
+                
                 switch(mode) {
                     case 'manual-in':
                         modeText = 'Manual-in';
-                        apiEndpoint = `/api/agent/manual-in?extension=${currentExtension}`;
+                        apiEndpoint = '/api/agent/manual-in';
                         break;
                     case 'auto-in':
                         modeText = 'Auto-in';
-                        apiEndpoint = `/api/agent/auto-in?extension=${currentExtension}`;
+                        apiEndpoint = '/api/agent/auto-in';
                         break;
                     case 'aux':
                         modeText = 'AUX';
-                        apiEndpoint = `/api/agent/aux?extension=${currentExtension}`;
+                        apiEndpoint = '/api/agent/aux';
                         break;
                     default:
                         alert('未知的Agent模式: ' + mode);
@@ -938,7 +1043,13 @@
                 }
                 
                 try {
-                    const response = await fetch(apiEndpoint);
+                    const response = await fetch(apiEndpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestBody)
+                    });
                     const result = await response.text();
                     alert(result);
                     
@@ -954,35 +1065,23 @@
             }
         }
 
-        async function agentLogout() {
-            try {
-                const response = await fetch(`/api/agent/logout?extension=${currentExtension}`);
-                const result = await response.text();
-                
-                agentLoggedIn = false;
-                currentAgentNumber = '';
-                document.getElementById('agentStatus').textContent = '分機: 1420 | 未登入Agent';
-                document.getElementById('agentBtn').textContent = 'Agent';
-                document.getElementById('agentDropdown').style.display = 'none';
-                alert(result);
-            } catch (error) {
-                alert('Agent登出失敗: ' + error.message);
-            }
-        }
 
         async function openMonitor() {
             document.getElementById('monitorWindow').style.display = 'block';
+            // 確保監聽狀態面板永遠顯示
+            document.getElementById('monitorStatus').style.display = 'block';
             
             // 立即載入第一次資料
             await refreshMonitorList();
             
-            // 開始自動重整監聽列表 (每5秒)
+            // 開始自動重整監聽列表 (每1秒)
             startMonitorAutoRefresh();
         }
         
         async function parseMonitoringExtensions(statusResult) {
             const targetExtensions = ['1411', '1424', '1422'];
             let html = '';
+            const currentTime = Date.now();
             
             for (const ext of targetExtensions) {
                 try {
@@ -1017,6 +1116,8 @@
                         status = '通話中';
                         statusClass = 'busy';
                         canMonitor = true;
+                        // 更新忙碌時間
+                        extensionStatusCache[ext].lastBusyTime = currentTime;
                         console.log(`🔴 分機 ${ext} 正在通話中`);
                     } else if (extStatusResult.includes('響鈴') || 
                               extStatusResult.includes('ALERTING') ||
@@ -1024,10 +1125,25 @@
                         status = '響鈴中';
                         statusClass = 'ringing';
                         canMonitor = true;
+                        // 更新忙碌時間
+                        extensionStatusCache[ext].lastBusyTime = currentTime;
                         console.log(`🟡 分機 ${ext} 響鈴中`);
                     } else {
-                        console.log(`🟢 分機 ${ext} 空閒`);
+                        // 檢查是否在3秒保持期內
+                        const timeSinceLastBusy = currentTime - extensionStatusCache[ext].lastBusyTime;
+                        if (extensionStatusCache[ext].status !== '空閒' && timeSinceLastBusy < 3000) {
+                            // 保持前一個忙碌狀態
+                            status = extensionStatusCache[ext].status;
+                            statusClass = status === '通話中' ? 'busy' : 'ringing';
+                            canMonitor = true;
+                            console.log(`⏰ 分機 ${ext} 保持狀態 ${status} (${Math.round((3000 - timeSinceLastBusy) / 1000)}秒)`);
+                        } else {
+                            console.log(`🟢 分機 ${ext} 空閒`);
+                        }
                     }
+                    
+                    // 更新緩存狀態
+                    extensionStatusCache[ext].status = status;
                     
                     const statusIcon = canMonitor ? '🔴' : '🟢';
                     const monitorButton = canMonitor ? 
@@ -1096,7 +1212,7 @@
             try {
                 // 先確保 CTI 登入
                 try {
-                    const loginResponse = await fetch('http://localhost:8080/api/unified-phone/login?extension=ctiuser&password=Avaya123!');
+                    const loginResponse = await fetch('/api/unified-phone/login?extension=ctiuser&password=Avaya123!');
                     const loginResult = await loginResponse.text();
                     console.log('CTI 登入檢查:', loginResult);
                 } catch (loginError) {
@@ -1107,14 +1223,9 @@
                 const result = await response.text();
                 
                 if (result.includes('成功') || result.includes('開始監聽')) {
-                    currentMonitorTarget = extension;
-                    document.getElementById('monitorStatus').style.display = 'block';
-                    document.getElementById('currentMonitor').textContent = `正在監聽分機 ${extension}`;
-                    
-                    // 刷新列表以反映監聽狀態
-                    setTimeout(() => {
-                        refreshMonitorList();
-                    }, 1000);
+                    // 顯示監聽專用面板
+                    showMonitorPanel(extension);
+                    // SSE會自動更新狀態和列表，這裡不需要手動更新
                 }
                 alert(result);
             } catch (error) {
@@ -1127,12 +1238,10 @@
                 const response = await fetch(`/api/monitor/stop?supervisorExtension=${currentExtension}`);
                 const result = await response.text();
                 
-                currentMonitorTarget = '';
-                document.getElementById('monitorStatus').style.display = 'none';
+                // SSE會自動更新狀態，這裡不需要手動更新
                 alert(result);
                 
-                // 刷新監聽列表
-                refreshMonitorList();
+                // SSE會自動刷新列表，這裡不需要手動刷新
             } catch (error) {
                 alert('停止監聽失敗: ' + error.message);
             }
@@ -1140,18 +1249,18 @@
 
         async function refreshMonitorList() {
             try {
-                console.log('🔄 手動刷新監聽列表...');
+                console.log('🔄 定時刷新監聽列表...');
                 
                 // 強制重新獲取最新狀態（不顯示載入訊息以避免閃爍）
                 const timestamp = new Date().getTime();
                 const statusResponse = await fetch(`/api/unified-phone/status-all?_t=${timestamp}`);
                 const statusResult = await statusResponse.text();
                 
-                console.log('✅ 刷新完成，更新列表...');
+                console.log('✅ 定時刷新完成，更新列表...');
                 document.getElementById('extensionList').innerHTML = await parseMonitoringExtensions(statusResult);
                 
             } catch (error) {
-                console.error('❌ 刷新監聽列表失敗:', error);
+                console.error('❌ 定時刷新監聽列表失敗:', error);
                 // 如果失敗，顯示預設列表
                 document.getElementById('extensionList').innerHTML = getDefaultMonitorList();
             }
@@ -1161,7 +1270,7 @@
             try {
                 // 先確保 CTI 登入
                 try {
-                    const loginResponse = await fetch('http://localhost:8080/api/unified-phone/login?extension=ctiuser&password=Avaya123!');
+                    const loginResponse = await fetch('/api/unified-phone/login?extension=ctiuser&password=Avaya123!');
                     const loginResult = await loginResponse.text();
                     console.log('CTI 登入檢查:', loginResult);
                 } catch (loginError) {
@@ -1172,10 +1281,9 @@
                 const result = await response.text();
                 
                 if (result.includes('成功')) {
-                    // 設定監聽狀態
-                    currentMonitorTarget = extension;
-                    document.getElementById('monitorStatus').style.display = 'block';
-                    document.getElementById('currentMonitor').textContent = `正在闖入分機 ${extension}`;
+                    // 顯示闖入專用面板
+                    showIntrudePanel(extension);
+                    // SSE會自動更新狀態和列表，這裡不需要手動更新
                 }
                 
                 alert(result);
@@ -1190,10 +1298,7 @@
                     const response = await fetch(`/api/monitor/barge-in?supervisorExtension=${currentExtension}&targetExtension=${currentMonitorTarget}`);
                     const result = await response.text();
                     
-                    if (result.includes('成功')) {
-                        // 闖入成功，更新狀態顯示
-                        document.getElementById('currentMonitor').textContent = `正在闖入分機 ${currentMonitorTarget}`;
-                    }
+                    // SSE會自動更新狀態，這裡不需要手動更新
                     alert(result);
                 } catch (error) {
                     alert('闖入失敗: ' + error.message);
@@ -1206,71 +1311,15 @@
                 const response = await fetch(`/api/monitor/hangup?supervisorExtension=${currentExtension}`);
                 const result = await response.text();
                 
-                // 清理監聽狀態
-                currentMonitorTarget = '';
-                document.getElementById('monitorStatus').style.display = 'none';
-                
+                // SSE會自動更新狀態，這裡不需要手動更新
                 alert(result);
                 
-                // 刷新監聽列表
-                refreshMonitorList();
+                // SSE會自動刷新列表，這裡不需要手動刷新
             } catch (error) {
                 alert('掛斷監聽失敗: ' + error.message);
             }
         }
 
-        // ========================================
-        // 方法記錄功能
-        // ========================================
-
-        async function openMethodLog() {
-            document.getElementById('methodLogPanel').style.display = 'block';
-            await refreshMethodLog();
-        }
-
-        function closeMethodLog() {
-            document.getElementById('methodLogPanel').style.display = 'none';
-        }
-
-        async function refreshMethodLog() {
-            try {
-                const logType = document.getElementById('logTypeSelect').value;
-                let url;
-                
-                if (logType === 'all') {
-                    url = '/api/method-log/all';
-                } else if (logType === 'statistics') {
-                    url = '/api/method-log/statistics';
-                } else {
-                    url = `/api/method-log/function?name=${encodeURIComponent(logType)}`;
-                }
-                
-                const response = await fetch(url);
-                const result = await response.text();
-                
-                document.getElementById('methodLogContent').textContent = result;
-            } catch (error) {
-                console.error('載入方法記錄失敗:', error);
-                document.getElementById('methodLogContent').textContent = '載入失敗: ' + error.message;
-            }
-        }
-
-        async function clearMethodLog() {
-            if (confirm('確定要清除所有方法記錄嗎？')) {
-                try {
-                    const response = await fetch('/api/method-log/clear');
-                    const result = await response.text();
-                    alert(result);
-                    await refreshMethodLog();
-                } catch (error) {
-                    alert('清除記錄失敗: ' + error.message);
-                }
-            }
-        }
-
-        function changeLogType() {
-            refreshMethodLog();
-        }
 
         // ========================================
         // 多線控制功能
@@ -1332,52 +1381,37 @@
             }
         }
 
+        // SSE 事件驅動更新
+        
         function startAutoRefresh() {
-        // 清除任何現有的定時器
-        stopAutoRefresh();
-        
-        console.log('🚀 自動更新功能已由 SSE 取代，不再使用輪詢');
-        
-        // 【重要】註解掉或刪除 setInterval，因為我們不再需要它了
-        /* multilineRefreshInterval = setInterval(async () => {
-            console.log('🔄 自動重整多線狀態...');
-            await refreshLines();
-            checkIncomingCallsStatus(); // 檢查來電狀態
-        }, 3000); 
-        */
-
-        // 第一次載入時手動刷新一次
-        setTimeout(() => {
-            refreshLines();
-        }, 500);
-            
-            // 先執行一次來電檢測
-            setTimeout(() => {
-                checkIncomingCallsStatus();
-            }, 1000);
-            
-            console.log('✅ 已開始自動重整多線狀態 (每3秒)，包含來電檢測');
+           console.log('startAutoRefresh 已被新的 SSE 流程取代，此處不執行任何操作。');
         }
 
         function stopAutoRefresh() {
-            if (multilineRefreshInterval) {
-                clearInterval(multilineRefreshInterval);
-                multilineRefreshInterval = null;
-                console.log('⏹️ 已停止自動重整');
+            if (eventSource) {
+                eventSource.close(); // 關閉現有的 SSE 連線
+                eventSource = null;
+                console.log('⏹️ 已關閉SSE連接');
             }
+            // 清除心跳檢測
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+            updateConnectionStatus('disconnected');
         }
 
         function startMonitorAutoRefresh() {
             // 清除任何現有的定時器
             stopMonitorAutoRefresh();
             
-            // 設置監聽列表自動重整定時器 (5秒)
+            // 設置監聽列表自動重整定時器 (1秒)
             monitorRefreshInterval = setInterval(async () => {
                 console.log('🔄 自動重整監聽列表...');
                 await refreshMonitorList();
-            }, 5000);
+            }, 1000);
             
-            console.log('✅ 已開始監聽列表自動重整 (每5秒)');
+            console.log('✅ 已開始監聽列表自動重整 (每1秒)');
         }
 
         function stopMonitorAutoRefresh() {
@@ -1415,7 +1449,7 @@
         }
 
         function parseLinesToDisplay(displayResult) {
-            const maxLines = 3; // 分機1420實際支持3條線路
+            const maxLines = 3; // 分機實際支持3條線路
             let html = '';
             
             // 解析現有線路
@@ -1509,7 +1543,7 @@
         }
 
         function parseServerLinesToDisplay(serverResult) {
-            const maxLines = 3; // 分機1420實際支持3條線路
+            const maxLines = 3; // 分機實際支持3條線路
             let html = '';
             
             // 創建固定的線路陣列 L1, L2, L3
@@ -1519,11 +1553,11 @@
             const lines = serverResult.split('\n');
             
             for (let line of lines) {
-                // 解析連線狀態：連線 1 [LineID: 1420_L2]: 🟢 通話中 (ACTIVE) [通話方數: 3] 🟠 [HELD] ↔ 1424
+                // 解析連線狀態：連線 1 [LineID: {extension}_L2]: 🟢 通話中 (ACTIVE) [通話方數: 3] 🟠 [HELD] ↔ 1424
                 const connectionMatch = line.match(/連線\s+(\d+)(?:\s*\[LineID:\s*([^\]]+)\])?\s*:\s*(.*)/);
                 if (connectionMatch) {
                     const connectionNum = parseInt(connectionMatch[1]);
-                    const lineId = connectionMatch[2]; // 實際線路ID，如 "1420_L2"
+                    const lineId = connectionMatch[2]; // 實際線路ID，如 "{extension}_L2"
                     const connectionInfo = connectionMatch[3];
                     
                     let status = 'idle';
@@ -1558,7 +1592,7 @@
                         let slotIndex = -1;
                         
                         if (lineId) {
-                            // 首先嘗試解析線路ID，例如 "1420_L2" -> L2 -> 位置1 (index 1)
+                            // 首先嘗試解析線路ID，例如 "{extension}_L2" -> L2 -> 位置1 (index 1)
                             const lineMatch = lineId.match(/_L(\d+)$/);
                             if (lineMatch) {
                                 const lineNumber = parseInt(lineMatch[1]);
@@ -1717,7 +1751,9 @@
 
         async function holdLine(lineNum) {
             try {
-                const response = await fetch(`/api/unified-phone/hold?ext=${currentExtension}`);
+                // 構建線路ID，使用指定線路Hold
+                const lineId = `${currentExtension}_L${lineNum}`;
+                const response = await fetch(`/api/unified-phone/hold-line?ext=${currentExtension}&lineId=${encodeURIComponent(lineId)}`);
                 const result = await response.text();
                 alert(result);
                 setTimeout(() => refreshLines(), 1000);
@@ -1728,7 +1764,9 @@
 
         async function unholdLine(lineNum) {
             try {
-                const response = await fetch(`/api/unified-phone/unhold?ext=${currentExtension}`);
+                // 構建線路ID，使用指定線路Unhold
+                const lineId = `${currentExtension}_L${lineNum}`;
+                const response = await fetch(`/api/unified-phone/unhold-line?ext=${currentExtension}&lineId=${encodeURIComponent(lineId)}`);
                 const result = await response.text();
                 alert(result);
                 setTimeout(() => refreshLines(), 1000);
@@ -1739,7 +1777,9 @@
 
         async function hangupLine(lineNum) {
             try {
-                const response = await fetch(`/api/unified-phone/hangup?ext=${currentExtension}`);
+                // 構建線路ID，應該使用currentExtension而不是硬編碼
+                const lineId = `${currentExtension}_L${lineNum}`;
+                const response = await fetch(`/api/unified-phone/hangup-line?ext=${currentExtension}&lineId=${encodeURIComponent(lineId)}`);
                 const result = await response.text();
                 alert(result);
                 setTimeout(() => refreshLines(), 1000);
@@ -1762,8 +1802,13 @@
         // 使用實際線路ID的操作函數
         async function holdLineWithId(lineId) {
             try {
-                // 使用統一話機API，它會自動找到活躍線路進行Hold
-                const response = await fetch(`/api/unified-phone/hold?ext=${currentExtension}`);
+                if (!lineId) {
+                    alert('無法Hold：未指定線路ID');
+                    return;
+                }
+                
+                // 使用指定線路ID的hold API
+                const response = await fetch(`/api/unified-phone/hold-line?ext=${currentExtension}&lineId=${encodeURIComponent(lineId)}`);
                 const result = await response.text();
                 alert(result);
                 setTimeout(() => refreshLines(), 1000);
@@ -1774,8 +1819,13 @@
 
         async function unholdLineWithId(lineId) {
             try {
-                // 使用統一話機API恢復Hold的通話
-                const response = await fetch(`/api/unified-phone/unhold?ext=${currentExtension}`);
+                if (!lineId) {
+                    alert('無法取消Hold：未指定線路ID');
+                    return;
+                }
+                
+                // 使用指定線路ID的unhold API
+                const response = await fetch(`/api/unified-phone/unhold-line?ext=${currentExtension}&lineId=${encodeURIComponent(lineId)}`);
                 const result = await response.text();
                 alert(result);
                 setTimeout(() => refreshLines(), 1000);
@@ -1861,60 +1911,210 @@
         function updateAgentStatusText(workMode) {
             if (agentLoggedIn && currentAgentNumber) {
                 document.getElementById('agentStatus').textContent = 
-                    `分機: 1420 | Agent: ${currentAgentNumber} | 狀態: ${workMode}`;
+                    `分機: ${currentExtension} | Agent: ${currentAgentNumber} | 狀態: ${workMode}`;
             }
         }
 
 
+        // 連接狀態指示器
+        function updateConnectionStatus(status) {
+            let statusText = '';
+            let statusColor = '';
+            
+            switch(status) {
+                case 'connected':
+                    statusText = '🟢 即時連接';
+                    statusColor = '#27ae60';
+                    break;
+                case 'connecting':
+                    statusText = '🟡 連接中...';
+                    statusColor = '#f39c12';
+                    break;
+                case 'disconnected':
+                    statusText = '🔴 連接中斷';
+                    statusColor = '#e74c3c';
+                    break;
+            }
+            
+            // 更新或創建狀態指示器
+            let indicator = document.getElementById('connectionStatus');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.id = 'connectionStatus';
+                indicator.style.cssText = `
+                    position: fixed;
+                    top: 10px;
+                    left: 10px;
+                    padding: 5px 10px;
+                    border-radius: 15px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    background: rgba(0,0,0,0.8);
+                    color: white;
+                    z-index: 1000;
+                `;
+                document.body.appendChild(indicator);
+            }
+            
+            indicator.textContent = statusText;
+            indicator.style.borderLeft = `4px solid ${statusColor}`;
+        }
+
+        // 連接SSE事件
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 10;
+        let heartbeatInterval = null;
+        
         function connectToSseEvents() {
-        // 如果已有連接，先關閉
-        if (eventSource) {
-            eventSource.close();
-        }
-
-        // 連接到後端的 SSE 端點，並傳入當前分機號
-        console.log(`[SSE] 正在連接到 /api/unified-phone/events?ext=${currentExtension}`);
-        eventSource = new EventSource(`/api/unified-phone/events?ext=${currentExtension}`);
-
-        // 監聽後端推送的 "phone_event" 事件
-        eventSource.addEventListener('phone_event', (event) => {
-            console.log('[SSE] 收到 phone_event:', event.data);
-            const eventData = JSON.parse(event.data);
-            
-            console.log(`[SSE] 事件類型: ${eventData.eventType}, 訊息: ${eventData.message}`);
-
-            // 收到任何事件，都觸發一次全面的狀態刷新
-            // 這是最簡單的實現，因為 refreshLines() 函式已經很完善
-            refreshLines();
-            
-            // 特別處理來電響鈴事件，讓接聽按鈕閃爍
-            if (eventData.eventType === 'RINGING') {
-                const answerBtn = document.querySelector('.control-btn.answer');
-                if (answerBtn) {
-                    answerBtn.classList.add('incoming-call');
-                }
-            } else if (eventData.eventType === 'DROPPED' || eventData.eventType === 'ACTIVE') {
-                // 如果是掛斷或接聽事件，停止閃爍
-                const answerBtn = document.querySelector('.control-btn.answer');
-                if (answerBtn) {
-                    answerBtn.classList.remove('incoming-call');
-                }
+            // 如果已有連接，先關閉
+            if (eventSource) {
+                eventSource.close();
             }
-        });
+            
+            // 清除之前的心跳檢測
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
 
-        // 監聽連接打開
-        eventSource.onopen = () => {
-            console.log('[SSE] ✅ 連接已建立，等待伺服器事件...');
-        };
+            console.log(`[SSE] 正在連接到 /api/unified-phone/events?ext=${currentExtension} (嘗試 ${reconnectAttempts + 1})`);
+            updateConnectionStatus('connecting');
+            
+            eventSource = new EventSource(`/api/unified-phone/events?ext=${currentExtension}`);
 
-        // 監聽錯誤
-        eventSource.onerror = (err) => {
-            console.error('[SSE] ❌ EventSource 發生錯誤:', err);
-            eventSource.close(); // 發生錯誤時關閉連接
-            // 可以在這裡加入重連邏輯
-            setTimeout(connectToSseEvents, 5000); // 5秒後嘗試重連
-        };
-    }
+            // 監聽【電話】相關事件 (用於通話、轉接、會議)
+            eventSource.addEventListener('phone_event', (event) => {
+                console.log('%c[SSE] 收到 phone_event!', 'color: #007bff; font-weight: bold;');
+                const eventData = JSON.parse(event.data);
+                console.log('[SSE] 資料:', eventData);
+
+                console.log('[SSE] isLoggedIn 狀態:', isLoggedIn);
+                console.log('[SSE] currentExtension:', currentExtension);
+                console.log('[SSE] 事件來源分機:', eventData.extension);
+                
+                if (isLoggedIn) {
+                    // 1. 刷新線路狀態 (既有功能)
+                    refreshLines();
+                    checkIncomingCallsStatus();
+
+                    // 2. *** UUI-MODIFIED ***: 檢查事件類型，決定是否要獲取 UUI
+                    console.log('[UUI] 檢查事件類型:', eventData.eventType);
+                    if (eventData.eventType === 'RINGING') {
+                        // 如果是響鈴事件，等待一小段時間讓 UUI 資料處理完成，然後獲取
+                        console.log('[UUI] 檢測到響鈴事件，1秒後開始獲取 UUI 資料...');
+                        setTimeout(() => {
+                            fetchAndDisplayUuiData(currentExtension);
+                        }, 1000); // 延遲 1 秒讓後端有時間處理 UUI
+                    } else if (eventData.eventType === 'DROPPED') {
+                        // 如果是掛斷事件，隱藏 UUI 彈窗
+                        console.log('[UUI] 檢測到掛斷事件，隱藏 UUI 彈窗');
+                        hideUuiPopup();
+                    } else {
+                        console.log('[UUI] 事件類型不是 RINGING 或 DROPPED，不處理 UUI');
+                    }
+                }
+            });
+            
+            // *** SSE-MODIFIED ***: 新增對 Agent 事件的監聽
+            eventSource.addEventListener('agent_event', (event) => {
+                console.log('%c[SSE] 收到 agent_event!', 'color: #fd7e14; font-weight: bold;');
+                console.log('[SSE] 資料:', event.data);
+                
+                if (isLoggedIn) {
+                    // 觸發 Agent 狀態顯示的更新
+                    console.log('[SSE] Agent 事件觸發狀態更新...');
+                    updateAgentStatusDisplay();
+                }
+            });
+
+            // *** SSE-MODIFIED ***: 新增對 Monitor 事件的監聽
+            eventSource.addEventListener('monitor_event', (event) => {
+                console.log('%c[SSE] 收到 monitor_event!', 'color: #17a2b8; font-weight: bold;');
+                const eventData = JSON.parse(event.data);
+                console.log('[SSE] 監聽事件資料:', eventData);
+                
+                // 如果監聽視窗是打開的，就刷新它
+                if (document.getElementById('monitorWindow').style.display === 'block') {
+                    console.log('[SSE] 監聽視窗已開啟，觸發列表刷新');
+                    refreshMonitorList();
+                }
+                
+                // 更新監聽狀態顯示
+                if (eventData.action === 'start') {
+                    if (eventData.supervisor === currentExtension) {
+                        // 自己開始監聽
+                        const statusText = eventData.type === 'BARGE_IN' ? 
+                            `正在闖入分機 ${eventData.target}` : 
+                            `正在監聽分機 ${eventData.target}`;
+                        document.getElementById('currentMonitor').textContent = statusText;
+                        currentMonitorTarget = eventData.target;
+                    }
+                } else if (eventData.action === 'stop' || eventData.action === 'hangup') {
+                    if (eventData.supervisor === currentExtension) {
+                        // 自己停止或掛斷監聽
+                        document.getElementById('currentMonitor').textContent = '無監聽/闖入狀態';
+                        currentMonitorTarget = '';
+                        console.log(`[SSE] 監聽狀態已清除: ${eventData.action}`);
+                    }
+                } else if (eventData.action === 'target_status_change') {
+                    // 監聽目標分機狀態變化
+                    console.log(`[SSE] 監聽目標 ${eventData.target} 狀態變化: ${eventData.target_action}`);
+                    // 刷新監聽列表
+                    if (document.getElementById('monitorWindow').style.display === 'block') {
+                        console.log('[SSE] 監聽目標狀態變化，觸發列表刷新');
+                        refreshMonitorList();
+                    }
+                }
+            });
+            
+            // 監聽連接確認事件
+            eventSource.addEventListener('connection', (event) => {
+                console.log('[SSE] 收到連接確認:', event.data);
+                const connectionData = JSON.parse(event.data);
+                console.log('[SSE] ✅ 連接成功，分機:', connectionData.extension);
+            });
+            
+            // 監聽心跳事件（用於保持連接活躍）
+            eventSource.addEventListener('heartbeat', (event) => {
+                console.log('[SSE] 收到心跳:', new Date().toLocaleTimeString());
+            });
+
+            // 監聽連接打開
+            eventSource.onopen = () => {
+                console.log('[SSE] ✅ 連接已建立，等待伺服器事件...');
+                updateConnectionStatus('connected');
+                reconnectAttempts = 0; // 重置重連次數
+                
+                // 開始心跳檢測 (每30秒)
+                heartbeatInterval = setInterval(() => {
+                    if (eventSource && eventSource.readyState === EventSource.OPEN) {
+                        console.log('[SSE] 💓 連接正常 -', new Date().toLocaleTimeString());
+                    }
+                }, 30000);
+            };
+
+            // 監聽錯誤
+            eventSource.onerror = (err) => {
+                console.error('[SSE] ❌ EventSource 發生錯誤:', err);
+                updateConnectionStatus('disconnected');
+                
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                }
+                
+                eventSource.close();
+                
+                // 指數退避重連策略
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // 最大30秒
+                    console.log(`[SSE] 🔄 ${delay/1000}秒後嘗試重連 (${reconnectAttempts}/${maxReconnectAttempts})`);
+                    setTimeout(connectToSseEvents, delay);
+                } else {
+                    console.error('[SSE] ❌ 達到最大重連次數，停止嘗試');
+                    updateConnectionStatus('disconnected');
+                }
+            };
+        }
 
         
         async function updateAgentStatusDisplay() {
@@ -1924,20 +2124,22 @@
                 const response = await fetch(`/api/agent/status?extension=${currentExtension}`);
                 const result = await response.text();
                 
-                // 從狀態回應中解析工作模式
-                let currentMode = '待機';
-                if (result.includes('手動接聽模式') || result.includes('WORK_NOT_READY')) {
+                console.log('[AGENT_STATUS] 收到的狀態回應:', result);
+                
+                // 簡化的狀態解析邏輯 - 基於既知的模式
+                let currentMode = 'AUX'; // 預設為 AUX，因為登入後會自動設定
+                
+                // 檢查本地記錄模式行
+                if (result.includes('本地記錄模式: 手動接聽')) {
                     currentMode = 'Manual-in';
-                } else if (result.includes('自動接聽模式') || result.includes('WORK_READY')) {
+                } else if (result.includes('本地記錄模式: 自動接聽')) {
                     currentMode = 'Auto-in';
-                } else if (result.includes('輔助工作狀態') || result.includes('NOT_READY')) {
+                } else if (result.includes('Avaya 狀態: 未就緒') || result.includes('本地記錄模式: 未設定')) {
                     currentMode = 'AUX';
-                } else if (result.includes('待機') || result.includes('READY')) {
-                    currentMode = '待機';
                 }
                 
                 updateAgentStatusText(currentMode);
-                console.log('Agent狀態更新:', currentMode);
+                console.log('[AGENT_STATUS] 解析後的狀態:', currentMode);
                 
             } catch (error) {
                 console.error('獲取Agent狀態失敗:', error);
@@ -1950,6 +2152,324 @@
                 document.getElementById('agentDropdown').style.display = 'none';
             }
         });
+        
+        // 手動刷新功能
+        function manualRefresh() {
+            console.log('🔄 手動刷新狀態...');
+            refreshLines();
+            checkIncomingCallsStatus();
+        }
+        
+        // 測試監聽事件模擬
+        async function simulateMonitorEvent(action = 'start', type = 'SILENT', target = '1424') {
+            try {
+                const response = await fetch(`/api/unified-phone/simulate-monitor-event?ext=${currentExtension}&action=${action}&type=${type}&target=${target}`);
+                const result = await response.text();
+                console.log('[SSE] 模擬事件結果:', result);
+                return result;
+            } catch (error) {
+                console.error('[SSE] 模擬事件失敗:', error);
+                throw error;
+            }
+        }
+        
+        // 測試目標分機狀態變化事件
+        async function simulateTargetStatusChange(target = '1424', action = 'hangup') {
+            try {
+                const response = await fetch(`/api/unified-phone/simulate-monitor-event?ext=${currentExtension}&action=target_status_change&target=${target}&target_action=${action}`);
+                const result = await response.text();
+                console.log('[SSE] 模擬目標狀態變化結果:', result);
+                return result;
+            } catch (error) {
+                console.error('[SSE] 模擬目標狀態變化失敗:', error);
+                throw error;
+            }
+        }
+        /*
+        // 頁面載入完成後立即建立SSE連接
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 頁面載入完成，建立SSE連接...');
+            connectToSseEvents();
+        });*/
+
+        // 頁面清理
+        window.addEventListener('beforeunload', function() {
+            if (multilineRefreshInterval) {
+                clearInterval(multilineRefreshInterval);
+            }
+            if (monitorRefreshInterval) {
+                clearInterval(monitorRefreshInterval);
+            }
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            if (eventSource) {
+                eventSource.close();
+                console.log('SSE連接已關閉');
+            }
+        });
+
+        // ========== 監聽/闖入面板功能 ==========
+        
+        function showMonitorPanel(extension) {
+            // 創建或更新監聽面板
+            let panel = document.getElementById('monitorPanel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'monitorPanel';
+                panel.style.cssText = `
+                    position: fixed;
+                    bottom: 20px;
+                    left: 20px;
+                    width: 300px;
+                    background: #e3f2fd;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                    z-index: 1500;
+                    border-left: 4px solid #2196f3;
+                `;
+                document.body.appendChild(panel);
+            }
+            
+            panel.innerHTML = `
+                <div style="padding: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <strong>🎧 監聽狀態</strong>
+                        <button onclick="hideMonitorPanel()" style="background: none; border: none; font-size: 18px; cursor: pointer;">&times;</button>
+                    </div>
+                    <div style="margin-bottom: 10px;">正在監聽分機 ${extension}</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="hangup()" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">掛斷退出</button>
+                        <button onclick="upgradeToIntrude('${extension}')" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">升級闖入</button>
+                    </div>
+                </div>
+            `;
+            
+            panel.style.display = 'block';
+        }
+        
+        function showIntrudePanel(extension) {
+            // 不再顯示闖入面板，只更新監聽狀態
+            // 留空函數以保持相容性
+        }
+        
+        function hideMonitorPanel() {
+            const panel = document.getElementById('monitorPanel');
+            if (panel) {
+                panel.style.display = 'none';
+            }
+            // 保持監聽狀態面板顯示，只清空內容
+            document.getElementById('currentMonitor').textContent = '無監聽/闖入狀態';
+            currentMonitorTarget = '';
+        }
+        
+        function hideIntrudePanel() {
+            // 不再需要隱藏闖入面板，因為不再顯示
+            // 留空函數以保持相容性
+        }
+        
+        async function upgradeToIntrude(extension) {
+            // 從監聽升級到闖入
+            hideMonitorPanel();
+            await intrude(extension);
+        }
+        
+        // ========== UUI 功能相關 ==========
+
+        function showUuiPopup() {
+            document.getElementById('uuiPopup').style.display = 'block';
+        }
+
+        function hideUuiPopup() {
+            document.getElementById('uuiPopup').style.display = 'none';
+            document.getElementById('uuiContent').innerHTML = '正在載入...'; // 重置內容
+        }
+
+        async function fetchAndDisplayUuiData(extension, retryCount = 0) {
+            console.log('[UUI] 正在為分機 ' + extension + ' 獲取來電資訊和 UUI 資料... (嘗試 ' + (retryCount + 1) + ')');
+            try {
+                const response = await fetch(`/api/uui/data?extension=${extension}`);
+                const data = await response.json();
+                
+                console.log('[UUI] API 回應狀態:', response.status);
+                console.log('[UUI] API 回應資料:', data);
+
+                const uuiContent = document.getElementById('uuiContent');
+
+                if (data.status === 'success') {
+                    console.log('[UUI] ✅ 成功獲取資料:', data);
+                    
+                    let htmlContent = '';
+                    
+                    // === 統一的來電資訊面板 ===
+                    htmlContent += '<div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 12px;">';
+                    htmlContent += '<h4 style="margin: 0 0 8px 0; color: #495057; font-size: 14px;">📞 來電者資訊</h4>';
+                    
+                    // 來電者號碼
+                    if (data.callerNumber) {
+                        htmlContent += `<div style="margin-bottom: 4px;"><strong>號碼:</strong> <span style="font-family: monospace; background: #e9ecef; padding: 2px 6px; border-radius: 3px;">${data.callerNumber}</span></div>`;
+                    }
+                    
+                    // 來電者名稱
+                    if (data.callerName && data.callerName.trim() !== '') {
+                        htmlContent += `<div style="margin-bottom: 4px;"><strong>名稱:</strong> <span style="color: #28a745; font-weight: 500;">${data.callerName}</span></div>`;
+                    }
+                    
+                    // 被叫號碼
+                    if (data.calledNumber) {
+                        htmlContent += `<div style="margin-bottom: 4px;"><strong>撥入分機:</strong> <span style="font-family: monospace;">${data.calledNumber}</span></div>`;
+                    }
+                    
+                    // UUI資訊 (如果有的話)
+                    if (data.parsedFields && Object.keys(data.parsedFields).length > 0) {
+                        // 過濾掉來電者相關的字段，只顯示真正的UUI資料
+                        const uuiFields = Object.entries(data.parsedFields).filter(([key, value]) => 
+                            !['caller_number', 'caller_name', 'called_number'].includes(key)
+                        );
+                        
+                        if (uuiFields.length > 0) {
+                            htmlContent += `<div style="margin-bottom: 4px; margin-top: 8px;"><strong>UUI資訊:</strong></div>`;
+                            
+                            // 為了讓顯示更友好，定義欄位名稱的中文翻譯
+                            const fieldNames = {
+                                'id': '客戶編號',
+                                'customer_id': '客戶編號',
+                                'queue': '服務佇列',
+                                'lang': '語言偏好',
+                                'language': '語言偏好',
+                                'ivr_path': 'IVR 路徑',
+                                'ticket_id': '工單號碼',
+                                'ticket': '工單號碼',
+                                'priority': '優先級',
+                                'vip': 'VIP 狀態',
+                                'department': '部門',
+                                'product': '產品類別',
+                                'case_type': '案件類型'
+                            };
+                            
+                            // 顯示UUI欄位（縮排顯示）
+                            for (const [key, value] of uuiFields) {
+                                const displayName = fieldNames[key] || key;
+                                htmlContent += `<div style="margin-bottom: 4px; margin-left: 16px;"><strong>${displayName}:</strong> <span style="color: #1976d2;">${value}</span></div>`;
+                            }
+                        }
+                    }
+                    
+                    htmlContent += '</div>';
+                    
+                    // === 第三部分：技術資訊（可收合） ===
+                    if (data.decodedData && data.timestamp) {
+                        htmlContent += '<details style="margin-top: 12px;">';
+                        htmlContent += '<summary style="cursor: pointer; color: #6c757d; font-size: 12px;">📋 技術詳情</summary>';
+                        htmlContent += '<div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; font-size: 11px; color: #6c757d;">';
+                        
+                        if (data.decodedData) {
+                            htmlContent += `<div><strong>解碼資料:</strong> ${data.decodedData}</div>`;
+                        }
+                        if (data.timestamp) {
+                            htmlContent += `<div style="margin-top: 4px;"><strong>時間:</strong> ${new Date(data.timestamp).toLocaleString()}</div>`;
+                        }
+                        
+                        htmlContent += '</div>';
+                        htmlContent += '</details>';
+                    }
+                    
+                    // 將組合好的 HTML 內容放入彈窗
+                    uuiContent.innerHTML = htmlContent;
+                    showUuiPopup();
+                } else {
+                    console.log('[UUI] ⚠️ 未找到來電資訊:', data.message);
+                    
+                    // 如果是第一次嘗試且沒有資料，等待 2 秒後重試一次
+                    if (retryCount === 0) {
+                        console.log('[UUI] 🔄 沒有找到資料，2秒後重試一次...');
+                        setTimeout(() => {
+                            fetchAndDisplayUuiData(extension, 1);
+                        }, 2000);
+                    } else {
+                        console.log('[UUI] ❌ 重試後仍然沒有資料');
+                        
+                        // 顯示一個提示訊息
+                        document.getElementById('uuiContent').innerHTML = `
+                            <div style="text-align: center; padding: 20px; color: #666;">
+                                <p>📞 此來電沒有額外資訊</p>
+                                <p style="font-size: 12px; margin-top: 10px;">無法獲取來電者詳細資訊或 UUI 資料</p>
+                            </div>
+                        `;
+                        showUuiPopup();
+                        
+                        // 3秒後自動隱藏
+                        setTimeout(() => {
+                            hideUuiPopup();
+                        }, 3000);
+                    }
+                }
+
+            } catch (error) {
+                console.error('[UUI] ❌ 獲取資料失敗:', error);
+                
+                if (retryCount === 0) {
+                    console.log('[UUI] 🔄 網路錯誤，1秒後重試...');
+                    setTimeout(() => {
+                        fetchAndDisplayUuiData(extension, 1);
+                    }, 1000);
+                } else {
+                    document.getElementById('uuiContent').textContent = '獲取資料失敗。';
+                    showUuiPopup();
+                }
+            }
+        }
+        
+        // *** 新增測試函數 ***
+        async function testUuiPopup() {
+            console.log('[UUI] 手動測試 UUI 彈窗...');
+            
+            try {
+                // 首先創建測試資料
+                const createResponse = await fetch(`/api/uui/test?extension=${currentExtension}`);
+                const createResult = await createResponse.json();
+                
+                console.log('[UUI] 測試資料創建結果:', createResult);
+                
+                if (createResult.status === 'success') {
+                    // 等待一下讓資料儲存完成
+                    setTimeout(() => {
+                        // 然後顯示UUI彈窗
+                        fetchAndDisplayUuiData(currentExtension);
+                    }, 500);
+                } else {
+                    alert('創建測試資料失敗');
+                }
+            } catch (error) {
+                console.error('[UUI] 創建測試資料失敗:', error);
+                alert('創建測試資料失敗: ' + error.message);
+            }
+        }
+        
+        // *** 測試監聽SSE功能 ***
+        async function testMonitorSse() {
+            try {
+                console.log('[SSE] 測試監聽SSE功能...');
+                const response = await fetch(`/api/unified-phone/test-monitor-sse?ext=${currentExtension}`);
+                const result = await response.text();
+                
+                console.log('[SSE] 測試結果:', result);
+                alert('✅ SSE測試完成！\n\n' + result);
+            } catch (error) {
+                console.error('[SSE] 測試失敗:', error);
+                alert('❌ SSE測試失敗: ' + error.message);
+            }
+        }
     </script>
+
+    <div class="uui-popup" id="uuiPopup">
+        <div class="uui-header">
+            <h3>📞 客戶來電資訊 (UUI)</h3>
+            <button class="uui-close-btn" onclick="hideUuiPopup()">&times;</button>
+        </div>
+        <div class="uui-content" id="uuiContent">
+            正在載入...
+        </div>
+    </div>
 </body>
 </html>
