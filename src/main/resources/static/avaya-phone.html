@@ -651,7 +651,9 @@
         let currentMonitorTarget = '';
         let eventSource = null; 
         let currentExtension = '';
-        
+        let currentLicenseSessionId = null; // 用來儲存授權 ID
+        let heartbeatIntervalId = null;
+
         // 状态缓存，防止闪烁
         let extensionStatusCache = {
             '1411': { status: '空閒', lastBusyTime: 0 },
@@ -659,131 +661,209 @@
             '1422': { status: '空閒', lastBusyTime: 0 }
         };
 
+        // =================================================================
+        // 修改後的 login 函數
+        // =================================================================
         async function login() {
             const extension = document.getElementById('extension').value;
             const agentId = document.getElementById('agentId').value;
-            
-            if (extension && agentId) {
-                try {
-                    // 設置當前控制的分機號碼和Agent帳號
-                    currentExtension = extension;
-                    currentAgentNumber = agentId;
-                    
-                    // 1. 先進行CTI登入
-                    const ctiResponse = await fetch(`/api/unified-phone/login?extension=ctiuser&password=Avaya123!`);
-                    const ctiResult = await ctiResponse.text();
-                    
-                    if (!(ctiResult.includes('成功') || ctiResult.includes('登入'))) {
-                        alert('CTI登入失敗：' + ctiResult);
-                        return;
-                    }
-                    
-                    // 2. 進行Agent登入 (POST方式)
-                    const agentResponse = await fetch('/api/agent/login', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            extension: currentExtension,
-                            agentId: agentId
-                        })
-                    });
-                    const agentResult = await agentResponse.text();
-                    
-                    if (agentResult.includes('成功') || agentResult.includes('已登入')) {
-                        // 登入成功
-                        document.getElementById('loginContainer').style.display = 'none';
-                        document.getElementById('phoneInterface').style.display = 'block';
-                        isLoggedIn = true;
-                        agentLoggedIn = true;
-                        
-                        // 更新多線控制和撥號標題
-                        document.getElementById('multilineTitle').textContent = `分機 ${currentExtension} - 多線控制`;
-                        document.getElementById('dialTitle').textContent = `撥號 - 分機 ${currentExtension}`;
-                        document.getElementById('dialDescription').textContent = `使用分機 ${currentExtension} 撥打電話`;
-                        
-                        alert('登入成功！CTI和Agent都已登入');
-                        console.log('🚀 登入成功，開始建立SSE連接並刷新畫面...');
 
-                        // 3. 建立 SSE 連線
-                        connectToSseEvents();
-
-                        // 4. 自動設定為 AUX 狀態，避免狀態檢測混淆
-                        setTimeout(async () => {
-                            try {
-                                console.log('🔧 登入後自動設定為 AUX 狀態...');
-                                const auxResponse = await fetch('/api/agent/aux', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json'
-                                    },
-                                    body: JSON.stringify({
-                                        extension: currentExtension
-                                    })
-                                });
-                                const auxResult = await auxResponse.text();
-                                console.log('AUX 設定結果:', auxResult);
-                                
-                                // 更新介面顯示為 AUX 狀態
-                                document.getElementById('agentStatus').textContent = `分機: ${currentExtension} | Agent: ${agentId} | 狀態: AUX`;
-                                
-                                // 刷新畫面狀態
-                                refreshLines();
-                                checkIncomingCallsStatus();
-                            } catch (error) {
-                                console.error('自動設定 AUX 狀態失敗:', error);
-                                // 即使 AUX 設定失敗，仍然顯示預設狀態
-                                document.getElementById('agentStatus').textContent = `分機: ${currentExtension} | Agent: ${agentId} | 狀態: 待機`;
-                                refreshLines();
-                                checkIncomingCallsStatus();
-                            }
-                        }, 1000); // 延遲 1 秒等待 Agent 登入完全穩定
-
-                    } else {
-                        alert('Agent登入失敗：' + agentResult);
-                    }
-                } catch (error) {
-                    alert('登入失敗：' + error.message);
-                }
-            } else {
+            if (!extension || !agentId) {
                 alert('請輸入分機號碼和Agent帳號');
+                return;
+            }
+
+            try {
+                // --- 第一步：檢查授權 ---
+                console.log('1. 正在申請授權...');
+                const licenseResponse = await fetch('/api/license/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: agentId }) // 使用 agentId 作為授權識別
+                });
+
+                if (!licenseResponse.ok) {
+                    // 授權失敗 (例如：人數已滿)
+                    const errorText = await licenseResponse.text();
+                    alert('授權失敗：' + errorText);
+                    console.error('授權失敗:', errorText);
+                    return; // 中斷登入流程
+                }
+
+                // 授權成功，取得並儲存 Session ID
+                const licenseResultText = await licenseResponse.text();
+                currentLicenseSessionId = licenseResultText.split(': ')[1];
+                console.log('✅ 授權成功, Session ID:', currentLicenseSessionId);
+
+
+                // --- 第二步：執行原本的電話和 Agent 登入 ---
+                console.log('2. 正在登入 CTI...');
+                currentExtension = extension;
+                currentAgentNumber = agentId;
+
+                const ctiResponse = await fetch(`/api/unified-phone/login?extension=ctiuser&password=Avaya123!`);
+                const ctiResult = await ctiResponse.text();
+
+                if (!(ctiResult.includes('成功') || ctiResult.includes('登入'))) {
+                    alert('CTI登入失敗：' + ctiResult);
+                    // CTI 登入失敗時，要記得把剛剛申請到的授權釋放掉
+                    await logout();
+                    return;
+                }
+                console.log('✅ CTI 登入成功');
+
+                console.log('3. 正在登入 Agent...');
+                const agentResponse = await fetch('/api/agent/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        extension: currentExtension,
+                        agentId: agentId
+                    })
+                });
+                const agentResult = await agentResponse.text();
+
+                if (agentResult.includes('成功') || agentResult.includes('已登入')) {
+                    // --- 第三步：全部登入成功，更新介面 ---
+                    console.log('✅ Agent 登入成功');
+                    document.getElementById('loginContainer').style.display = 'none';
+                    document.getElementById('phoneInterface').style.display = 'block';
+                    isLoggedIn = true;
+                    agentLoggedIn = true;
+
+                    document.getElementById('multilineTitle').textContent = `分機 ${currentExtension} - 多線控制`;
+                    document.getElementById('dialTitle').textContent = `撥號 - 分機 ${currentExtension}`;
+                    document.getElementById('dialDescription').textContent = `使用分機 ${currentExtension} 撥打電話`;
+
+                    alert('登入成功！授權、CTI和Agent都已就緒');
+                    console.log('🚀 登入成功，開始建立SSE連接並刷新畫面...');
+
+                    connectToSseEvents();
+                     startHeartbeat(); // 啟動心跳機制
+                    // 自動設定為 AUX 狀態
+                    setTimeout(async () => {
+                        try {
+                            console.log('🔧 登入後自動設定為 AUX 狀態...');
+                            await fetch('/api/agent/aux', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ extension: currentExtension })
+                            });
+                            document.getElementById('agentStatus').textContent = `分機: ${currentExtension} | Agent: ${agentId} | 狀態: AUX`;
+                            refreshLines();
+                            checkIncomingCallsStatus();
+                        } catch (error) {
+                            console.error('自動設定 AUX 狀態失敗:', error);
+                        }
+                    }, 1000);
+
+                } else {
+                    alert('Agent登入失敗：' + agentResult);
+                    // Agent 登入失敗時，也要釋放授權
+                    await logout();
+                }
+            } catch (error) {
+                alert('登入過程中發生嚴重錯誤：' + error.message);
+                console.error('登入錯誤:', error);
+                // 發生任何網路錯誤等問題時，都嘗試釋放授權
+                await logout();
             }
         }
 
+        // =================================================================
+        // 修改後的 logout 函數
+        // =================================================================
         async function logout() {
             try {
+                console.log('1. 開始登出流程...');
                 // 1. 登出Agent (POST方式)
                 if (agentLoggedIn && currentAgentNumber) {
                     await fetch('/api/agent/logout', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             extension: currentExtension
                         })
                     });
-                    console.log('Agent已登出');
+                    console.log('✅ Agent已登出');
                 }
-                
+
                 // 2. 關閉SSE連接
                 stopAutoRefresh();
-                
-                // 3. 更新UI狀態
+                stopHeartbeat();
+                console.log('✅ SSE 連接已關閉');
+
+                // --- 第三步：釋放授權 ---
+                if (currentLicenseSessionId) {
+                    console.log('3. 正在釋放授權, Session ID:', currentLicenseSessionId);
+                    await fetch('/api/license/logout', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId: currentLicenseSessionId })
+                    });
+                    console.log('✅ 授權已釋放');
+                    currentLicenseSessionId = null; // 清除ID
+                }
+
+            } catch (error) {
+                console.error('登出過程中發生錯誤:', error);
+                // 即使發生錯誤，也要確保UI被重置
+            } finally {
+                // 4. 無論如何都更新UI狀態
                 document.getElementById('loginContainer').style.display = 'block';
                 document.getElementById('phoneInterface').style.display = 'none';
                 isLoggedIn = false;
                 agentLoggedIn = false;
                 currentAgentNumber = '';
                 document.getElementById('agentStatus').textContent = '未登入';
-                
-                console.log('系統登出完成');
-            } catch (error) {
-                console.error('登出時發生錯誤:', error);
+
+                console.log('✅ 系統登出完成，介面已重置');
+                alert('已登出');
             }
-            alert('已登出');
         }
+
+        // =================================================================
+// 新增的心跳相關函數
+// =================================================================
+async function sendHeartbeat() {
+    if (!currentLicenseSessionId) {
+        console.log('尚未登入，停止發送心跳');
+        stopHeartbeat();
+
+        return;
+    }
+
+    try {
+        console.log('💓 Sending heartbeat...', currentLicenseSessionId);
+        const response = await fetch('/api/license/heartbeat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: currentLicenseSessionId })
+        });
+
+        if (!response.ok) {
+            console.error('心跳發送失敗:', response.statusText);
+        }
+    } catch (error) {
+        console.error('心跳發送時發生網路錯誤:', error);
+    }
+}
+
+function startHeartbeat() {
+    // 先清除可能存在的舊定時器
+    stopHeartbeat();
+    // 每 30 秒發送一次心跳 (30000 毫秒)
+    heartbeatIntervalId = setInterval(sendHeartbeat, 10000);
+    console.log('✅ 心跳機制已啟動');
+}
+
+function stopHeartbeat() {
+    if (heartbeatIntervalId) {
+        clearInterval(heartbeatIntervalId);
+        heartbeatIntervalId = null;
+        console.log('⏹️ 心跳機制已停止');
+    }
+}
 
         async function answer() {
             try {
@@ -1248,6 +1328,20 @@
         }
 
         async function refreshMonitorList() {
+            // ==========================================================
+            //                      --- 修正開始 ---
+            // ==========================================================
+            const extensionListElement = document.getElementById('extensionList');
+            // 防禦性檢查：如果找不到監聽列表元素，就停止執行並清除定時器
+            if (!extensionListElement) {
+                console.warn('監聽列表元素(extensionList)不存在，自動停止刷新定時器。');
+                stopMonitorAutoRefresh(); // 呼叫停止函數
+                return; // 直接退出，不再執行後續程式碼
+            }
+            // ==========================================================
+            //                      --- 修正結束 ---
+            // ==========================================================
+
             try {
                 console.log('🔄 定時刷新監聽列表...');
                 
@@ -1257,12 +1351,15 @@
                 const statusResult = await statusResponse.text();
                 
                 console.log('✅ 定時刷新完成，更新列表...');
-                document.getElementById('extensionList').innerHTML = await parseMonitoringExtensions(statusResult);
+                // 使用剛剛宣告的變數來更新，更安全
+                extensionListElement.innerHTML = await parseMonitoringExtensions(statusResult);
                 
             } catch (error) {
                 console.error('❌ 定時刷新監聽列表失敗:', error);
-                // 如果失敗，顯示預設列表
-                document.getElementById('extensionList').innerHTML = getDefaultMonitorList();
+                // 如果失敗，也使用變數來更新，避免二次錯誤
+                if (extensionListElement) {
+                    extensionListElement.innerHTML = getDefaultMonitorList();
+                }
             }
         }
 
