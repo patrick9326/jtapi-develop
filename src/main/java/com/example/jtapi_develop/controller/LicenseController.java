@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
+import org.springframework.http.ResponseEntity; 
 import java.util.Map;
 
 @RestController
@@ -28,21 +28,23 @@ public class LicenseController {
         return ResponseEntity.ok("Heartbeat received.");
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<String> login(@RequestBody Map<String, String> payload) {
-        String userId = payload.get("userId");
-        if (userId == null || userId.isEmpty()) {
-            return ResponseEntity.badRequest().body("User ID is required.");
-        }
-
-        String sessionId = licenseService.acquireLicense(userId);
-
-        if (sessionId != null) {
-            return ResponseEntity.ok("Login successful. Session ID: " + sessionId);
-        } else {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("License limit reached. Cannot log in.");
-        }
+   @PostMapping("/login")
+public ResponseEntity<?> login(@RequestBody Map<String, String> payload) {
+    String userId = payload.get("userId");
+    if (userId == null || userId.isEmpty()) {
+        return ResponseEntity.badRequest().body("User ID is required.");
     }
+
+    Map<String, String> result = licenseService.acquireLicense(userId);
+
+    if (result != null && !result.isEmpty()) {
+        // 登入成功，回傳包含 sessionId 和 role 的 JSON 物件
+        return ResponseEntity.ok(result);
+    } else {
+        // 登入失敗
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body("License limit reached or user/role not found. Cannot log in.");
+    }
+}
 
     @PostMapping("/logout")
     public ResponseEntity<String> logout(@RequestBody Map<String, String> payload) {

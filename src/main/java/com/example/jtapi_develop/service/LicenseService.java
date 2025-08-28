@@ -1,50 +1,88 @@
 package com.example.jtapi_develop.service;
+
 import com.example.jtapi_develop.entity.ActiveSession;
+import com.example.jtapi_develop.entity.Role;
+import com.example.jtapi_develop.entity.User;
 import com.example.jtapi_develop.repository.ActiveSessionRepository;
+import com.example.jtapi_develop.repository.RoleRepository;
+import com.example.jtapi_develop.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import java.util.Optional; // 引入 Optional
+
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+
 @Service
 public class LicenseService {
-    private static final int MAX_CONCURRENT_USERS = 20;
+
+    @Value("${license.total:20}")
+    private int totalLicenses;
+
     @Autowired
     private ActiveSessionRepository activeSessionRepository;
-    /**
-     * 更新一個授權的心跳時間
-     * @param sessionId 要更新的 session ID
-     */
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private RoleRepository roleRepository;
+
     public void updateHeartbeat(String sessionId) {
-        Optional<ActiveSession> sessionOptional = activeSessionRepository.findById(sessionId);
-        if (sessionOptional.isPresent()) {
-            ActiveSession session = sessionOptional.get();
+        activeSessionRepository.findById(sessionId).ifPresent(session -> {
             session.setLastHeartbeatTime(LocalDateTime.now());
             activeSessionRepository.save(session);
-        }
+        });
     }
-    /**
-     * 嘗試為使用者取得一個授權 (登入)
-     * @param userId 使用者 ID
-     * @return 如果成功，返回一個新的 session ID；如果失敗 (人數已滿)，返回 null
-     */
-    public String acquireLicense(String userId) {
-        long currentUsers = activeSessionRepository.count();
 
-        if (currentUsers < MAX_CONCURRENT_USERS) {
+    public Map<String, String> acquireLicense(String userId) {
+        Optional<User> userOptional = userRepository.findById(userId);
+        if (userOptional.isEmpty()) {
+            return null;
+        }
+        User user = userOptional.get();
+        String userRoleName = user.getRoleName();
+
+        Optional<Role> roleOptional = roleRepository.findById("director");
+        if (roleOptional.isEmpty()) {
+            return null;
+        }
+        int directorGuaranteed = roleOptional.get().getGuaranteedLicenses();
+
+        long totalActive = activeSessionRepository.count();
+
+        if (totalActive >= totalLicenses) {
+            return null;
+        }
+
+        boolean canLogin = false;
+        if ("director".equalsIgnoreCase(userRoleName)) {
+            canLogin = true;
+        } else if ("staff".equalsIgnoreCase(userRoleName)) {
+            long activeStaff = activeSessionRepository.countByRoleName("staff");
+            int maxAllowedStaff = totalLicenses - directorGuaranteed;
+            if (activeStaff < maxAllowedStaff) {
+                canLogin = true;
+            }
+        }
+
+        if (canLogin) {
             String sessionId = UUID.randomUUID().toString();
-            ActiveSession newSession = new ActiveSession(sessionId, userId, LocalDateTime.now(),LocalDateTime.now());
+            ActiveSession newSession = new ActiveSession(sessionId, user.getUserId(), user.getRoleName(), LocalDateTime.now(), LocalDateTime.now());
             activeSessionRepository.save(newSession);
-            return sessionId;
+
+            Map<String, String> result = new HashMap<>();
+            result.put("sessionId", sessionId);
+            result.put("role", user.getRoleName());
+            return result;
         } else {
-            // 人數已滿，拒絕登入
             return null;
         }
     }
-    /**
-     * 釋放一個授權 (登出)
-     * @param sessionId 要釋放的 session ID
-     */
+
     public void releaseLicense(String sessionId) {
         activeSessionRepository.deleteById(sessionId);
     }

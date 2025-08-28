@@ -561,7 +561,7 @@
                 </div>
             </div>
             
-            <button class="control-btn monitor" onclick="openMonitor()">監聽</button>
+           <button class="control-btn monitor" id="monitor-btn" onclick="openMonitor()">監聽</button>
             <button class="control-btn" onclick="openMultiline()" style="background: #28a745; color: white;">多線</button>
         </div>
         
@@ -664,111 +664,101 @@
         // =================================================================
         // 修改後的 login 函數
         // =================================================================
-        async function login() {
-            const extension = document.getElementById('extension').value;
-            const agentId = document.getElementById('agentId').value;
+        let userRole = ''; // 在全域範圍宣告一個變數來儲存使用者角色
 
-            if (!extension || !agentId) {
-                alert('請輸入分機號碼和Agent帳號');
-                return;
-            }
+async function login() {
+    const extension = document.getElementById('extension').value;
+    const agentId = document.getElementById('agentId').value;
 
-            try {
-                // --- 第一步：檢查授權 ---
-                console.log('1. 正在申請授權...');
-                const licenseResponse = await fetch('/api/license/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId: agentId }) // 使用 agentId 作為授權識別
-                });
+    if (!extension || !agentId) {
+        alert('請輸入分機號碼和Agent帳號');
+        return;
+    }
 
-                if (!licenseResponse.ok) {
-                    // 授權失敗 (例如：人數已滿)
-                    const errorText = await licenseResponse.text();
-                    alert('授權失敗：' + errorText);
-                    console.error('授權失敗:', errorText);
-                    return; // 中斷登入流程
-                }
+    try {
+        // --- 第一步：授權登入 (呼叫 License API) ---
+        console.log('1. 正在申請授權...');
+        const licenseResponse = await fetch('/api/license/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: agentId })
+        });
 
-                // 授權成功，取得並儲存 Session ID
-                const licenseResultText = await licenseResponse.text();
-                currentLicenseSessionId = licenseResultText.split(': ')[1];
-                console.log('✅ 授權成功, Session ID:', currentLicenseSessionId);
-
-
-                // --- 第二步：執行原本的電話和 Agent 登入 ---
-                console.log('2. 正在登入 CTI...');
-                currentExtension = extension;
-                currentAgentNumber = agentId;
-
-                const ctiResponse = await fetch(`/api/unified-phone/login?extension=ctiuser&password=Avaya123!`);
-                const ctiResult = await ctiResponse.text();
-
-                if (!(ctiResult.includes('成功') || ctiResult.includes('登入'))) {
-                    alert('CTI登入失敗：' + ctiResult);
-                    // CTI 登入失敗時，要記得把剛剛申請到的授權釋放掉
-                    await logout();
-                    return;
-                }
-                console.log('✅ CTI 登入成功');
-
-                console.log('3. 正在登入 Agent...');
-                const agentResponse = await fetch('/api/agent/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        extension: currentExtension,
-                        agentId: agentId
-                    })
-                });
-                const agentResult = await agentResponse.text();
-
-                if (agentResult.includes('成功') || agentResult.includes('已登入')) {
-                    // --- 第三步：全部登入成功，更新介面 ---
-                    console.log('✅ Agent 登入成功');
-                    document.getElementById('loginContainer').style.display = 'none';
-                    document.getElementById('phoneInterface').style.display = 'block';
-                    isLoggedIn = true;
-                    agentLoggedIn = true;
-
-                    document.getElementById('multilineTitle').textContent = `分機 ${currentExtension} - 多線控制`;
-                    document.getElementById('dialTitle').textContent = `撥號 - 分機 ${currentExtension}`;
-                    document.getElementById('dialDescription').textContent = `使用分機 ${currentExtension} 撥打電話`;
-
-                    alert('登入成功！授權、CTI和Agent都已就緒');
-                    console.log('🚀 登入成功，開始建立SSE連接並刷新畫面...');
-
-                    connectToSseEvents();
-                     startHeartbeat(); // 啟動心跳機制
-                    // 自動設定為 AUX 狀態
-                    setTimeout(async () => {
-                        try {
-                            console.log('🔧 登入後自動設定為 AUX 狀態...');
-                            await fetch('/api/agent/aux', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ extension: currentExtension })
-                            });
-                            document.getElementById('agentStatus').textContent = `分機: ${currentExtension} | Agent: ${agentId} | 狀態: AUX`;
-                            refreshLines();
-                            checkIncomingCallsStatus();
-                        } catch (error) {
-                            console.error('自動設定 AUX 狀態失敗:', error);
-                        }
-                    }, 1000);
-
-                } else {
-                    alert('Agent登入失敗：' + agentResult);
-                    // Agent 登入失敗時，也要釋放授權
-                    await logout();
-                }
-            } catch (error) {
-                alert('登入過程中發生嚴重錯誤：' + error.message);
-                console.error('登入錯誤:', error);
-                // 發生任何網路錯誤等問題時，都嘗試釋放授權
-                await logout();
-            }
+        if (!licenseResponse.ok) {
+            const errorText = await licenseResponse.json(); // 改為 .json() 來獲取後端的回應
+            throw new Error('授權失敗: ' + (errorText.message || JSON.stringify(errorText)));
         }
+
+        const licenseData = await licenseResponse.json(); // 將回傳結果解析為 JSON
+        currentLicenseSessionId = licenseData.sessionId; // 儲存 Session ID
+        userRole = licenseData.role; // 將角色儲存到全域變數
+        console.log('✅ 授權成功, Session ID:', currentLicenseSessionId, '角色:', userRole);
+
+        // --- 根據角色顯示/隱藏監聽功能 ---
+        const monitorButton = document.getElementById('monitor-btn');
+        if (userRole === 'staff') {
+            console.log('使用者是 staff，隱藏監聽按鈕。');
+            monitorButton.style.display = 'none'; // 如果是 staff，隱藏按鈕
+        } else {
+            console.log('使用者是 director，顯示監聽按鈕。');
+            monitorButton.style.display = 'inline-block'; // 如果是 director，確保按鈕可見
+        }
+
+        // --- 第二步：執行原本的電話和 Agent 登入 ---
+        console.log('2. 正在登入 CTI...');
+        currentExtension = extension;
+        currentAgentNumber = agentId;
+
+        const ctiResponse = await fetch(`/api/unified-phone/login?extension=ctiuser&password=Avaya123!`);
+        const ctiResult = await ctiResponse.text();
+
+        if (!(ctiResult.includes('成功') || ctiResult.includes('登入'))) {
+            throw new Error('CTI登入失敗：' + ctiResult);
+        }
+        console.log('✅ CTI 登入成功');
+
+        console.log('3. 正在登入 Agent...');
+        const agentResponse = await fetch('/api/agent/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                extension: currentExtension,
+                agentId: agentId
+            })
+        });
+        const agentResult = await agentResponse.text();
+
+        if (agentResult.includes('成功') || agentResult.includes('已登入')) {
+            // --- 第三步：全部登入成功，更新介面 ---
+            console.log('✅ Agent 登入成功');
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('phoneInterface').style.display = 'block';
+            isLoggedIn = true;
+            agentLoggedIn = true;
+
+            document.getElementById('multilineTitle').textContent = `分機 ${currentExtension} - 多線控制`;
+
+            alert('登入成功！授權、CTI和Agent都已就緒');
+            console.log('🚀 登入成功，開始建立SSE連接並刷新畫面...');
+
+            connectToSseEvents();
+            startHeartbeat(); // 啟動心跳機制
+            
+            // 自動設定為 AUX 狀態
+            setTimeout(async () => {
+                await setAgentMode('aux'); // 直接呼叫 setAgentMode 函數
+            }, 1000);
+
+        } else {
+            throw new Error('Agent登入失敗：' + agentResult);
+        }
+    } catch (error) {
+        alert('登入過程中發生錯誤：' + error.message);
+        console.error('登入錯誤:', error);
+        // 發生任何錯誤時，都嘗試釋放授權
+        await logout();
+    }
+}
 
         // =================================================================
         // 修改後的 logout 函數
