@@ -36,6 +36,24 @@
             font-size: 24px;
         }
 
+        /* 新增這個 class 來包裹中間的按鈕 */
+.control-bar-buttons {
+    display: flex;
+    gap: 15px; /* 按鈕間距 */
+}
+
+/* 新增這個 class 來定義左側狀態的樣式 */
+.agent-status-display {
+    padding: 10px;
+    background: rgba(255,255,255,0.9);
+    border-radius: 5px;
+    font-weight: bold;
+    color: #333;
+    min-width: 250px;
+    text-align: center;
+}
+
+
         .form-group {
             margin-bottom: 20px;
             text-align: left;
@@ -80,21 +98,31 @@
 
         .phone-interface {
             display: none;
+            /* 將 phone-interface 設為 flex 容器，讓 control-bar 能撐開寬度 */
+            display: none;
+            flex-direction: column;
+            align-items: center;
             width: 100%;
-            background: white;
-            padding: 20px;
+            padding: 20px; /* 給予一些間距 */
         }
 
         .control-bar {
-            width: 1000px;
-            height: 80px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
+    width: 1200px; /* 加寬 */
+    height: 80px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* 修改為 space-between */
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    margin: 0 auto;
+    padding: 0 25px; /* 增加內邊距 */
+        }
+        
+        /* 新增：用於包裹中間按鈕的容器 */
+        .control-bar-buttons {
             display: flex;
-            align-items: center;
-            justify-content: space-around;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            margin: 0 auto;
+            gap: 15px; /* 按鈕間距 */
         }
 
         .control-btn {
@@ -121,7 +149,6 @@
             color: white;
         }
 
-        /* 來電閃爍效果 */
         .control-btn.answer.incoming-call {
             animation: incomingCallBlink 1s infinite;
         }
@@ -190,6 +217,26 @@
         .dropdown-content a:hover {
             background-color: #f1f1f1;
         }
+        
+        /* 新增：登出按鈕樣式 */
+        .logout-btn {
+            padding: 10px 20px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        /* 新增：狀態顯示樣式 */
+        .agent-status-display {
+            padding: 10px;
+            background: rgba(255,255,255,0.9);
+            border-radius: 5px;
+            font-weight: bold;
+            color: #333;
+        }
 
         .modal {
             display: none;
@@ -255,7 +302,7 @@
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            width: 740px; /* 調整為700px內容 + 20px*2 padding */
+            width: 740px;
             max-height: 400px;
             overflow-y: auto;
             z-index: 1000;
@@ -291,8 +338,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0 15px; /* 左右內邊距 */
-            box-sizing: border-box; /* 確保padding包含在寬度內 */
+            padding: 0 15px;
+            box-sizing: border-box;
         }
 
         .extension-item:hover {
@@ -448,28 +495,6 @@
             color: black;
         }
 
-        .logout-btn {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            padding: 10px 20px;
-            background: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-
-        .agent-status {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            padding: 10px;
-            background: rgba(255,255,255,0.9);
-            border-radius: 5px;
-            font-weight: bold;
-        }
-
         .uui-popup {
             display: none;
             position: fixed;
@@ -517,6 +542,12 @@
         .uui-content strong {
             color: #495057;
         }
+        /* 當作為 iframe 插件載入時，隱藏不必要的彈出視窗 */
+        body.is-widget .multiline-panel-container,
+        body.is-widget .monitor-window,
+        body.is-widget .uui-popup {
+        display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -533,16 +564,14 @@
         <button type="button" class="login-btn" onclick="login()">登入</button>
     </div>
 
-    <div class="phone-interface" id="phoneInterface">
-        <div class="agent-status" id="agentStatus">未登入</div>
-        <button class="logout-btn" onclick="logout()">登出</button>
-        
-        <div class="control-bar">
+   <div class="phone-interface" id="phoneInterface">
+    <div class="control-bar">
+        <div class="agent-status-display" id="agentStatusDisplay">未登入</div>
+
+        <div class="control-bar-buttons">
             <button class="control-btn answer" onclick="answer()">接聽</button>
             <button class="control-btn hangup" onclick="hangup()">掛斷</button>
-            
             <button class="control-btn dial" onclick="dial()">撥號</button>
-            
             <div class="dropdown">
                 <button class="control-btn transfer" onclick="toggleTransfer()">轉接</button>
                 <div class="dropdown-content" id="transferDropdown">
@@ -551,7 +580,6 @@
                     <a onclick="transfer('conference')">三方 (會議)</a>
                 </div>
             </div>
-            
             <div class="dropdown">
                 <button class="control-btn agent" onclick="toggleAgentDropdown()" id="agentBtn">Agent 狀態</button>
                 <div class="dropdown-content" id="agentDropdown">
@@ -560,91 +588,20 @@
                     <a onclick="setAgentMode('aux')">AUX</a>
                 </div>
             </div>
-            
-           <button class="control-btn monitor" id="monitor-btn" onclick="openMonitor()">監聽</button>
+            <button class="control-btn monitor" id="monitor-btn" onclick="openMonitor()">監聽</button>
             <button class="control-btn" onclick="openMultiline()" style="background: #28a745; color: white;">多線</button>
         </div>
-        
-        <!-- 多線控制區域 -->
-        <div id="multilinePanel" style="display: none; margin-top: 20px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0; color: #333;" id="multilineTitle">多線控制</h3>
-                <button onclick="closeMultiline()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">關閉</button>
-            </div>
-            
-            <div id="linesList" class="lines-container">
-                <!-- 線路會在這裡動態生成 -->
-            </div>
-            
-            <div style="margin-top: 15px; display: flex; gap: 10px;">
-                <button onclick="refreshLines()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">🔄 刷新狀態</button>
-                <button onclick="dialOnNewLine()" style="background: #20c997; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">📞 新線路撥號</button>
-            </div>
-        </div>
+
+        <button class="logout-btn" onclick="logout()">登出</button>
     </div>
-
-
-    <div class="modal" id="dialModal">
-        <div class="modal-content">
-            <h2 id="dialTitle">撥號</h2>
-            <input type="text" class="modal-input" id="dialNumber" placeholder="請輸入要撥打的電話號碼" autofocus>
-            <div style="margin: 15px 0; font-size: 14px; color: #666;">
-                <span id="dialDescription">撥打電話</span>
-            </div>
-            <div>
-                <button class="modal-btn primary" onclick="makeCall()">撥號</button>
-                <button class="modal-btn secondary" onclick="closeDialModal()">取消</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="monitor-window" id="monitorWindow">
-        <div class="monitor-header">
-            <h3>監聽列表</h3>
-            <div style="display: flex; gap: 8px;">
-                <button style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;" onclick="testMonitorSse()" title="測試SSE功能">🧪</button>
-                <button style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;" onclick="refreshMonitorList()" title="手動刷新列表">🔄</button>
-                <button style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px;" onclick="closeMonitor()">關閉</button>
-            </div>
-        </div>
-        <ul class="extension-list" id="extensionList">
-            <li class="extension-item">
-                <span>分機 1001 - 分機</span>
-                <div class="extension-actions">
-                    <button class="action-btn monitor-btn" onclick="startMonitor('1001')">監聽</button>
-                    <button class="action-btn intrude-btn" onclick="intrude('1001')">闖入</button>
-                </div>
-            </li>
-            <li class="extension-item">
-                <span>分機 1002 - 分機</span>
-                <div class="extension-actions">
-                    <button class="action-btn monitor-btn" onclick="startMonitor('1002')">監聽</button>
-                    <button class="action-btn intrude-btn" onclick="intrude('1002')">闖入</button>
-                </div>
-            </li>
-            <li class="extension-item">
-                <span>分機 1003 - 分機</span>
-                <div class="extension-actions">
-                    <button class="action-btn monitor-btn" onclick="startMonitor('1003')">監聽</button>
-                    <button class="action-btn intrude-btn" onclick="intrude('1003')">闖入</button>
-                </div>
-            </li>
-        </ul>
-        <div id="monitorStatus" style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 5px; border-left: 4px solid #2196f3; display: block;">
-            <div style="margin-bottom: 10px;">
-                <strong>🎧 監聽狀態:</strong> <span id="currentMonitor"></span>
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <button class="modal-btn primary" onclick="stopMonitor()" style="background: #dc3545;">掛斷</button>
-            </div>
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #dee2e6; font-size: 12px; color: #666;">
-                🔄 列表每1秒自動更新
-            </div>
-        </div>
 
     </div>
 
     <script>
+        // 【新增這段】判斷是否在 iframe 中
+    if (window.self !== window.top) {
+        document.body.classList.add('is-widget');
+    }
         let isLoggedIn = false;
         let agentLoggedIn = false;
         let currentAgentNumber = '';
@@ -732,13 +689,15 @@ async function login() {
             // --- 第三步：全部登入成功，更新介面 ---
             console.log('✅ Agent 登入成功');
             document.getElementById('loginContainer').style.display = 'none';
-            document.getElementById('phoneInterface').style.display = 'block';
+            document.getElementById('phoneInterface').style.display = 'flex';
             isLoggedIn = true;
             agentLoggedIn = true;
 
             document.getElementById('multilineTitle').textContent = `分機 ${currentExtension} - 多線控制`;
-
+            updateAgentStatusText('登入中...');
             alert('登入成功！授權、CTI和Agent都已就緒');
+            // 【新增這行】通知父視窗(Loader)登入成功
+            window.parent.postMessage({ event: 'loginSuccess' }, '*');
             console.log('🚀 登入成功，開始建立SSE連接並刷新畫面...');
 
             connectToSseEvents();
@@ -764,6 +723,7 @@ async function login() {
         // 修改後的 logout 函數
         // =================================================================
         async function logout() {
+            window.parent.postMessage({ event: 'logout' }, '*');
             try {
                 console.log('1. 開始登出流程...');
                 // 1. 登出Agent (POST方式)
@@ -805,7 +765,7 @@ async function login() {
                 isLoggedIn = false;
                 agentLoggedIn = false;
                 currentAgentNumber = '';
-                document.getElementById('agentStatus').textContent = '未登入';
+                document.getElementById('agentStatusDisplay').textContent = '未登入';
 
                 console.log('✅ 系統登出完成，介面已重置');
                 alert('已登出');
@@ -1997,54 +1957,16 @@ function stopHeartbeat() {
         
         function updateAgentStatusText(workMode) {
             if (agentLoggedIn && currentAgentNumber) {
-                document.getElementById('agentStatus').textContent = 
-                    `分機: ${currentExtension} | Agent: ${currentAgentNumber} | 狀態: ${workMode}`;
+            // 更新到新的顯示位置
+            document.getElementById('agentStatusDisplay').textContent = 
+            `分機: ${currentExtension} | Agent: ${currentAgentNumber} | 狀態: ${workMode}`;
             }
-        }
+        }   
 
 
         // 連接狀態指示器
         function updateConnectionStatus(status) {
-            let statusText = '';
-            let statusColor = '';
-            
-            switch(status) {
-                case 'connected':
-                    statusText = '🟢 即時連接';
-                    statusColor = '#27ae60';
-                    break;
-                case 'connecting':
-                    statusText = '🟡 連接中...';
-                    statusColor = '#f39c12';
-                    break;
-                case 'disconnected':
-                    statusText = '🔴 連接中斷';
-                    statusColor = '#e74c3c';
-                    break;
-            }
-            
-            // 更新或創建狀態指示器
-            let indicator = document.getElementById('connectionStatus');
-            if (!indicator) {
-                indicator = document.createElement('div');
-                indicator.id = 'connectionStatus';
-                indicator.style.cssText = `
-                    position: fixed;
-                    top: 10px;
-                    left: 10px;
-                    padding: 5px 10px;
-                    border-radius: 15px;
-                    font-size: 12px;
-                    font-weight: bold;
-                    background: rgba(0,0,0,0.8);
-                    color: white;
-                    z-index: 1000;
-                `;
-                document.body.appendChild(indicator);
-            }
-            
-            indicator.textContent = statusText;
-            indicator.style.borderLeft = `4px solid ${statusColor}`;
+           console.log(`Connection status: ${status}`); // 只保留日誌，方便除錯
         }
 
         // 連接SSE事件
@@ -2548,6 +2470,49 @@ function stopHeartbeat() {
             }
         }
     </script>
+
+    <!-- 撥號模態框 -->
+    <div class="modal" id="dialModal">
+        <div class="modal-content">
+            <h2>撥號</h2>
+            <input type="text" id="dialNumber" class="modal-input" placeholder="請輸入電話號碼" maxlength="20">
+            <div>
+                <button class="modal-btn primary" onclick="makeCall()">撥號</button>
+                <button class="modal-btn secondary" onclick="closeDialModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 監聽窗口 -->
+    <div class="monitor-window" id="monitorWindow">
+        <div class="monitor-header">
+            <h3>分機監聽</h3>
+            <button onclick="closeMonitor()" style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">關閉</button>
+        </div>
+        <ul class="extension-list" id="extensionList">
+            <!-- 監聽列表將由 JavaScript 動態生成 -->
+        </ul>
+        <div id="monitorStatus" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+            <div><strong>監聽狀態:</strong> <span id="currentMonitor">無監聽/闖入狀態</span></div>
+        </div>
+    </div>
+
+    <!-- 多線控制面板 -->
+    <div class="modal" id="multilinePanel" style="display: none;">
+        <div style="background: white; margin: 5% auto; padding: 20px; border-radius: 10px; width: 90%; max-width: 1000px; max-height: 80vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
+                <h2 id="multilineTitle" style="margin: 0; color: #333;">多線控制</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dialOnNewLine()" style="background: #20c997; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">新撥號</button>
+                    <button onclick="manualRefresh()" style="background: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">刷新</button>
+                    <button onclick="closeMultiline()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">關閉</button>
+                </div>
+            </div>
+            <div class="lines-container" id="linesList">
+                <!-- 線路狀態將由 JavaScript 動態生成 -->
+            </div>
+        </div>
+    </div>
 
     <div class="uui-popup" id="uuiPopup">
         <div class="uui-header">
