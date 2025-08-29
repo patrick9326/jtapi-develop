@@ -1,5 +1,6 @@
 package com.example.jtapi_develop;
 
+import com.example.jtapi_develop.repository.MonitorPermissionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
@@ -9,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.Map;
+import java.util.List;
 import javax.telephony.events.TermConnRingingEv;
 import javax.telephony.events.TermConnActiveEv;
 import javax.telephony.events.TermConnDroppedEv;
@@ -28,7 +30,10 @@ public class PhoneCallService {
     private UuiService uuiService;
     
     @Autowired
-    private SseService sseService; 
+    private SseService sseService;
+    
+    @Autowired
+    private MonitorPermissionRepository monitorPermissionRepository; 
     // 存儲每個分機/用戶的連線信息
     private final ConcurrentHashMap<String, ExtensionConnection> extensions = new ConcurrentHashMap<>();
     
@@ -171,10 +176,9 @@ public class PhoneCallService {
                     resultMessage = "CTI 用戶 " + extension + " 登入成功，具備分機控制權限";
                     System.out.println("[" + extension + "] CTI 用戶登入成功");
                     
-                    // ================== 重要：為主要分機建立JTAPI事件監聽器 ==================
-                    // 只要是 CTI 用戶登入，就設置事件監聽器（不限定特定用戶名）
-                    setupMainExtensionListeners(conn);
-                    System.out.println("[" + extension + "] 已為 CTI 用戶設置事件監聽器");
+                    // ================== 重要：為所有可監聽分機建立JTAPI事件監聽器 ==================
+                    setupAllMonitorableExtensionListeners(conn);
+                    System.out.println("[" + extension + "] 已為 CTI 用戶設置所有監聽器");
                     // ================================================================
                 } else {
                     resultMessage = "分機 " + extension + " 登入成功";
@@ -232,25 +236,34 @@ public class PhoneCallService {
     }
 
     /**
-     * 為主要分機(1420)建立JTAPI事件監聽器
+     * 為所有可監聽分機建立JTAPI事件監聽器
      */
-    private void setupMainExtensionListeners(ExtensionConnection ctiConn) {
+    private void setupAllMonitorableExtensionListeners(ExtensionConnection ctiConn) {
         try {
-            System.out.println("[SETUP_LISTENERS] 開始為主要分機建立監聽器...");
+            System.out.println("[SETUP_LISTENERS] 開始為所有可監聽分機建立監聽器...");
             
-            // 為分機1420建立監聽器
-            String[] mainExtensions = {"1420"};
+            // 直接使用注入的 Repository 獲取所有可被監聽的分機
+            List<String> targetExtensions = monitorPermissionRepository.findAllTargetExtensions();
             
-            for (String ext : mainExtensions) {
+            if (targetExtensions.isEmpty()) {
+                System.out.println("[SETUP_LISTENERS] 沒有找到可監聽的分機");
+                return;
+            }
+            
+            System.out.println("[SETUP_LISTENERS] 找到 " + targetExtensions.size() + " 個可監聽分機: " + targetExtensions);
+            
+            int successCount = 0;
+            for (String ext : targetExtensions) {
                 try {
                     Address address = ctiConn.provider.getAddress(ext);
                     Terminal[] terminals = address.getTerminals();
                     
                     if (terminals != null && terminals.length > 0) {
                         Terminal terminal = terminals[0];
-                        addTerminalListener(ext, terminal, address); // *** 已修改 *** 傳入 address 物件
+                        addTerminalListener(ext, terminal, address);
                         System.out.println("[SETUP_LISTENERS] ✅ 已為分機 " + ext + " 建立監聽器");
-                    }else {
+                        successCount++;
+                    } else {
                         System.out.println("[SETUP_LISTENERS] ❌ 分機 " + ext + " 沒有可用的Terminal");
                     }
                 } catch (Exception e) {
@@ -258,9 +271,9 @@ public class PhoneCallService {
                 }
             }
             
-            System.out.println("[SETUP_LISTENERS] 主要分機監聽器設置完成");
+            System.out.println("[SETUP_LISTENERS] 監聽器設置完成: " + successCount + "/" + targetExtensions.size() + " 成功");
         } catch (Exception e) {
-            System.err.println("[SETUP_LISTENERS] 設置主要分機監聽器時發生錯誤: " + e.getMessage());
+            System.err.println("[SETUP_LISTENERS] 設置監聽器時發生錯誤: " + e.getMessage());
         }
     }
 
@@ -295,6 +308,14 @@ public class PhoneCallService {
             System.err.println("[FORCE_SETUP] 設置監聽器失敗: " + e.getMessage());
             return "❌ 設置監聽器失敗: " + e.getMessage();
         }
+    }
+    
+    /**
+     * API端點：強制設置監聽器
+     */
+    @PostMapping("/force-setup-listener")
+    public String forceSetupListenerApi(@RequestParam String extension) {
+        return forceSetupListener(extension);
     }
 
     /**
@@ -830,6 +851,10 @@ public class PhoneCallService {
                             sseService.sendEvent(extension, "phone_event", phoneEventData);
                             System.out.println("[PHONE_DIRECT_SSE] 已推送話機狀態變化事件到分機 " + extension);
                             
+                            // *** 直接推送監聽事件 ***
+                            notifyAllMonitors(extension, eventClassName, "分機 " + extension + " 狀態變化: " + eventClassName);
+                            System.out.println("[MONITOR_BROADCAST] 已通知所有監聽者 " + extension + " 的狀態變化");
+                            
                             // *** 新增：立即觸發UnifiedPhoneService同步狀態 ***
                             try {
                                 UnifiedPhoneService unifiedPhoneService = applicationContext.getBean(UnifiedPhoneService.class);
@@ -1035,6 +1060,35 @@ public class PhoneCallService {
             System.err.println("[AGENT_CHECK] 檢查Agent狀態失敗: " + e.getMessage());
             // 發生錯誤時預設允許通話
             return true;
+        }
+    }
+    
+    /**
+     * 通知所有監聽者目標分機狀態變化（仿照 UnifiedPhoneService）
+     */
+    private void notifyAllMonitors(String targetExtension, String action, String message) {
+        try {
+            // 獲取所有活躍的SSE連接
+            String[] activeExtensions = sseService.getActiveExtensions();
+            
+            Map<String, String> monitorEventData = new HashMap<>();
+            monitorEventData.put("action", "target_status_change");
+            monitorEventData.put("target", targetExtension);
+            monitorEventData.put("target_action", action);
+            monitorEventData.put("target_message", message);
+            monitorEventData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+            
+            // 向所有活躍連接推送監聽事件
+            for (String ext : activeExtensions) {
+                try {
+                    sseService.sendEvent(ext, "call_status_change", monitorEventData);
+                    System.out.println("[MONITOR_NOTIFY] 通知 " + ext + " 目標分機 " + targetExtension + " 狀態: " + action);
+                } catch (Exception e) {
+                    System.err.println("[MONITOR_NOTIFY] 通知失敗: " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[MONITOR_NOTIFY] 監聽通知失敗: " + e.getMessage());
         }
     }
     

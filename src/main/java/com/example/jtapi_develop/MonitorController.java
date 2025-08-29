@@ -1,7 +1,9 @@
 package com.example.jtapi_develop;
 
+import com.example.jtapi_develop.repository.MonitorPermissionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/monitor")
@@ -9,6 +11,18 @@ public class MonitorController {
     
     @Autowired
     private MonitorService monitorService;
+    
+    @Autowired
+    private MonitorPermissionRepository monitorPermissionRepository;
+    
+    /**
+     * 獲取用戶可監聽的分機列表
+     * GET /api/monitor/permissions?supervisorId=2420
+     */
+    @GetMapping("/permissions")
+    public List<String> getMonitorPermissions(@RequestParam String supervisorId) {
+        return monitorPermissionRepository.findTargetExtensionsBySupervisorIdNative(supervisorId);
+    }
     
     /**
      * 查詢可監聽的通話

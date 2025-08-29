@@ -102,4 +102,13 @@ public class PhoneCallController {
     public String getStatus() {
         return phoneCallService.getExtensionStatus();
     }
+    
+    /**
+     * 強制設置監聽器
+     * POST /api/phone/force-setup-listener?extension=1420
+     */
+    @PostMapping("/force-setup-listener")
+    public String forceSetupListener(@RequestParam String extension) {
+        return phoneCallService.forceSetupListener(extension);
+    }
 }
